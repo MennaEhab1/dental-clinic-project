@@ -32,7 +32,6 @@ interface DashboardLayoutProps {
 const patientNav = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/patient/dashboard" },
   { icon: Calendar, label: "Appointments", href: "/patient/appointments" },
-  { icon: History, label: "Appointment History", href: "/patient/history" },
   { icon: FileText, label: "Medical Records", href: "/patient/records" },
   { icon: Pill, label: "Prescriptions", href: "/patient/prescriptions" },
   { icon: Star, label: "Reviews", href: "/patient/reviews" },

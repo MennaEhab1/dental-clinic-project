@@ -25,8 +25,8 @@ import {
   Send,
   Calendar,
 } from "lucide-react";
-import type { Review, Appointment } from "@/types";
-import { reviewService, appointmentService } from "@/services/api";
+import type { Review, Doctor } from "@/types";
+import { reviewService, doctorService } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface ReviewWithAppointment extends Review {
@@ -53,15 +53,11 @@ export default function PatientReviews() {
     rating: 5,
     comment: "",
   });
-  const [completedAppointments, setCompletedAppointments] = useState<
-    Appointment[]
-  >([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const { user } = useAuth();
 
   useEffect(() => {
     const fetchReviews = async () => {
-      if (!user?.id) return;
-
       try {
         setIsLoading(true);
 
@@ -69,18 +65,27 @@ export default function PatientReviews() {
         const reviewsResult = await reviewService.getMyReviews();
         if (reviewsResult.success && reviewsResult.data) {
           setReviews(reviewsResult.data);
+        } else {
+          console.warn(
+            "[PatientReviews] Failed to fetch reviews or no data returned",
+          );
+          setReviews([]);
         }
 
-        // Fetch completed appointments for writing new reviews
-        const appointmentsResult = await appointmentService.getByPatient();
-        if (appointmentsResult.success && appointmentsResult.data) {
-          const completed = appointmentsResult.data.filter(
-            (apt) => apt.status === "completed",
+        // Fetch available doctors for writing reviews
+        const doctorsResult = await doctorService.getAll();
+        if (doctorsResult.success && doctorsResult.data) {
+          setDoctors(doctorsResult.data);
+        } else {
+          console.warn(
+            "[PatientReviews] Failed to fetch doctors or no data returned",
           );
-          setCompletedAppointments(completed);
+          setDoctors([]);
         }
       } catch (error) {
         console.error("[PatientReviews] Error:", error);
+        setReviews([]);
+        setDoctors([]);
       } finally {
         setIsLoading(false);
       }
@@ -333,20 +338,16 @@ export default function PatientReviews() {
         </div>
 
         {/* Available Doctors for Review */}
-        {completedAppointments.length > 0 && (
+        {doctors.length > 0 && (
           <div>
             <Separator />
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-6 mb-4">
               You can review these doctors
             </h2>
             <div className="grid gap-4">
-              {completedAppointments
-                .map((apt) => apt.doctor)
+              {doctors
                 .filter(
-                  (doc, idx, self) =>
-                    doc &&
-                    self.findIndex((d) => d?.id === doc.id) === idx &&
-                    !reviews.some((r) => r.doctorId === doc.id),
+                  (doc) => doc && !reviews.some((r) => r.doctorId === doc.id),
                 )
                 .map((doctor, index) => (
                   <motion.div

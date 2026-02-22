@@ -988,39 +988,13 @@ export const appointmentService = {
         },
       );
 
-      // If API returns empty array, use mock data for now (for debugging/development)
+      // If API returns empty array, that's correct for accounts with no appointments
       if (data.length === 0) {
-        console.warn(
-          "[appointmentService.getByPatient] ⚠️  Backend returned empty appointments, using mock data for debugging",
-        );
-        // For demo, return all mock appointments with doctor/service enrichment
-        // In production, filter by patientId from token if needed
-        const enrichedMockAppointments = mockAppointments.map((appt) => {
-          // Enrich with doctor data from mockDoctors
-          const doctor = mockDoctors.find((d) => d.id === appt.doctorId);
-          const service = mockServices.find((s) => s.id === appt.serviceId);
-          const enrichedAppt = { ...appt, doctor, service };
-          return appointmentService.mapBackendToAppointment(enrichedAppt);
-        });
         console.debug(
-          "[appointmentService.getByPatient] ✅ Enriched mock appointments with doctor info:",
-          {
-            count: enrichedMockAppointments.length,
-            appointments: enrichedMockAppointments.map((a) => ({
-              id: a.id,
-              patientId: a.patientId,
-              date: a.date,
-              time: a.time,
-              status: a.status,
-              doctorId: a.doctorId,
-              doctorName: a.doctor
-                ? `${a.doctor.firstName} ${a.doctor.lastName}`
-                : "Unknown",
-              hasDoctorInfo: !!a.doctor,
-            })),
-          },
+          "[appointmentService.getByPatient] ✅ Backend returned no appointments (correct for new accounts)",
         );
-        return { data: enrichedMockAppointments, success: true };
+        // Return empty array - new accounts should have zero appointments
+        return { data: [], success: true };
       }
 
       const appointments = data.map((item) =>
@@ -1046,25 +1020,16 @@ export const appointmentService = {
         "[appointmentService.getByPatient] ❌ Failed to fetch appointments:",
         error,
       );
-      // Fall back to mock data on error (for development/debugging)
+      // Return empty array on error instead of showing mock data
+      // This ensures data isolation - users only see their own appointments
       console.warn(
-        "[appointmentService.getByPatient] ⚠️  Falling back to mock appointments for debugging",
+        "[appointmentService.getByPatient] ⚠️  Failed to fetch, returning empty appointments",
       );
-      // For demo, return all mock appointments with doctor/service enrichment
-      const enrichedMockAppointments = mockAppointments.map((appt) => {
-        // Enrich with doctor data from mockDoctors
-        const doctor = mockDoctors.find((d) => d.id === appt.doctorId);
-        const service = mockServices.find((s) => s.id === appt.serviceId);
-        const enrichedAppt = { ...appt, doctor, service };
-        return appointmentService.mapBackendToAppointment(enrichedAppt);
-      });
-      console.debug(
-        "[appointmentService.getByPatient] ✅ Enriched mock appointments (on error):",
-        {
-          count: enrichedMockAppointments.length,
-        },
-      );
-      return { data: enrichedMockAppointments, success: true };
+      return {
+        data: [],
+        success: false,
+        message: "Failed to fetch appointments",
+      };
     }
   },
 

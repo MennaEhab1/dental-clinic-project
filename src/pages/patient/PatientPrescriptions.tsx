@@ -25,7 +25,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import type { Prescription, PrescriptionMedication } from "@/types";
-import { prescriptionService, appointmentService } from "@/services/api";
+import { prescriptionService } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface EnhancedPrescription extends Prescription {
@@ -48,65 +48,45 @@ export default function PatientPrescriptions() {
 
   useEffect(() => {
     const fetchPrescriptions = async () => {
-      if (!user?.id) return;
-
       try {
         setIsLoading(true);
 
-        // Fetch all appointments to get prescription details
-        const appointmentsResult = await appointmentService.getByPatient();
+        // Fetch prescriptions directly from backend
+        const result = await prescriptionService.getMyPrescriptions();
 
-        if (appointmentsResult.success && appointmentsResult.data) {
-          const appointmentsWithPrescriptions = appointmentsResult.data.filter(
-            (apt) => apt.prescription || apt.status === "completed",
-          );
-
-          // Fetch detailed prescriptions for each appointment
-          const prescriptionDetailsPromises = appointmentsWithPrescriptions.map(
-            async (apt) => {
-              try {
-                const prscResult = await prescriptionService.getByAppointment(
-                  apt.id,
-                );
-                if (prscResult.success && prscResult.data) {
-                  return {
-                    ...prscResult.data,
-                    doctorName:
-                      `${apt.doctor?.firstName || ""} ${apt.doctor?.lastName || ""}`.trim(),
-                    doctorAvatar: apt.doctor?.avatar,
-                    doctorSpecialty: apt.doctor?.specialty,
-                    appointmentDate: apt.date,
-                    appointmentService: apt.service?.name,
-                  } as EnhancedPrescription;
-                }
-              } catch (error) {
-                console.error(
-                  "[PatientPrescriptions] Error fetching prescription for appointment",
-                  apt.id,
-                  error,
-                );
-              }
-              return null;
-            },
-          );
-
-          const prescriptionDetails = await Promise.all(
-            prescriptionDetailsPromises,
-          );
-          const validPrescriptions = prescriptionDetails.filter(
-            (p): p is EnhancedPrescription => p !== null,
-          );
-
+        if (result.success && result.data && Array.isArray(result.data)) {
           // Sort by creation date, most recent first
-          validPrescriptions.sort(
+          const sortedPrescriptions = result.data.sort(
             (a, b) =>
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+              new Date(b.date || "").getTime() -
+              new Date(a.date || "").getTime(),
           );
 
-          setPrescriptions(validPrescriptions);
+          // Convert to enhanced prescriptions
+          const enhanced = sortedPrescriptions.map(
+            (prsc) =>
+              ({
+                ...prsc,
+              }) as EnhancedPrescription,
+          );
+
+          setPrescriptions(enhanced);
+          console.debug(
+            "[PatientPrescriptions] Loaded prescriptions:",
+            enhanced.length,
+          );
+        } else {
+          console.debug(
+            "[PatientPrescriptions] No prescriptions found or invalid response",
+          );
+          setPrescriptions([]);
         }
       } catch (error) {
-        console.error("[PatientPrescriptions] Error:", error);
+        console.error(
+          "[PatientPrescriptions] Error fetching prescriptions:",
+          error,
+        );
+        setPrescriptions([]);
       } finally {
         setIsLoading(false);
       }

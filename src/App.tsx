@@ -20,7 +20,6 @@ import NotFound from "./pages/NotFound";
 // Patient Pages
 import PatientDashboard from "./pages/patient/PatientDashboard";
 import PatientAppointments from "./pages/patient/PatientAppointments";
-import PatientAppointmentHistory from "./pages/patient/PatientAppointmentHistory";
 import PatientMedicalRecords from "./pages/patient/PatientMedicalRecords";
 import PatientPrescriptions from "./pages/patient/PatientPrescriptions";
 import PatientReviews from "./pages/patient/PatientReviews";
@@ -70,10 +69,6 @@ const App = () => (
               <Route
                 path="/patient/appointments"
                 element={<PatientAppointments />}
-              />
-              <Route
-                path="/patient/history"
-                element={<PatientAppointmentHistory />}
               />
               <Route
                 path="/patient/records"

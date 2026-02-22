@@ -1,0 +1,218 @@
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { LoadingCard } from '@/components/common/LoadingSpinner';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { 
+  Calendar, 
+  Users, 
+  DollarSign,
+  ArrowRight,
+  TrendingUp,
+  UserPlus,
+  Stethoscope,
+  Activity
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { dashboardService } from '@/services/api';
+import type { DashboardStats } from '@/types';
+import { useAuth } from '@/contexts/AuthContext';
+import { mockPatients, mockDoctors, mockAppointments } from '@/services/mockData';
+
+export default function AdminDashboard() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const response = await dashboardService.getStats();
+        setStats(response.data);
+      } catch (error) {
+        console.error('Failed to fetch stats:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const dashboardStats = [
+    { label: 'Total Patients', value: stats?.totalPatients || 0, icon: Users, change: '+12%', color: 'text-primary', bg: 'bg-primary/10' },
+    { label: 'Total Doctors', value: stats?.totalDoctors || 0, icon: Stethoscope, change: '+2', color: 'text-accent', bg: 'bg-accent/10' },
+    { label: 'Appointments', value: stats?.todayAppointments || 0, icon: Calendar, change: '+8%', color: 'text-warning', bg: 'bg-warning/10' },
+    { label: 'Revenue', value: `$${(stats?.revenue || 0).toLocaleString()}`, icon: DollarSign, change: '+15%', color: 'text-success', bg: 'bg-success/10' },
+  ];
+
+  const statusColors: Record<string, string> = {
+    pending: 'bg-warning/10 text-warning',
+    confirmed: 'bg-primary/10 text-primary',
+    completed: 'bg-success/10 text-success',
+    'in-progress': 'bg-accent/10 text-accent',
+  };
+
+  return (
+    <DashboardLayout role="admin">
+      <div className="space-y-6">
+        {/* Welcome Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="gradient-hero-bg rounded-2xl p-6 md:p-8"
+        >
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="font-display text-2xl md:text-3xl font-bold text-foreground mb-2">
+                Admin Dashboard 🏥
+              </h1>
+              <p className="text-muted-foreground">
+                Overview of your dental center's performance.
+              </p>
+            </div>
+            <div className="hidden md:flex gap-2">
+              <Button variant="outline">
+                <Activity className="w-4 h-4 mr-2" />
+                Reports
+              </Button>
+              <Link to="/admin/doctors">
+                <Button className="gradient-bg border-0">
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Add Doctor
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {dashboardStats.map((stat, index) => (
+            <motion.div
+              key={stat.label}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+            >
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className={`p-2 rounded-lg ${stat.bg} ${stat.color}`}>
+                      <stat.icon className="w-5 h-5" />
+                    </div>
+                    <Badge variant="secondary" className="text-xs bg-success/10 text-success">
+                      <TrendingUp className="w-3 h-3 mr-1" />
+                      {stat.change}
+                    </Badge>
+                  </div>
+                  <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+
+        <div className="grid lg:grid-cols-2 gap-6">
+          {/* Recent Appointments */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-lg font-display">Recent Appointments</CardTitle>
+              <Link to="/admin/appointments">
+                <Button variant="ghost" size="sm">
+                  View All
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <LoadingCard />
+              ) : (
+                <div className="space-y-4">
+                  {mockAppointments.slice(0, 5).map((appointment) => (
+                    <div
+                      key={appointment.id}
+                      className="flex items-center justify-between p-3 rounded-lg border border-border"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-9 w-9">
+                          <AvatarImage src={appointment.patient?.avatar} />
+                          <AvatarFallback>
+                            {appointment.patient?.firstName[0]}{appointment.patient?.lastName[0]}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-medium text-sm text-foreground">
+                            {appointment.patient?.firstName} {appointment.patient?.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {appointment.service?.name}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge className={statusColors[appointment.status]}>
+                        {appointment.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Staff Overview */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-lg font-display">Medical Staff</CardTitle>
+              <Link to="/admin/doctors">
+                <Button variant="ghost" size="sm">
+                  Manage
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {mockDoctors.slice(0, 5).map((doctor) => (
+                  <div
+                    key={doctor.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-9 w-9">
+                        <AvatarImage src={doctor.avatar} />
+                        <AvatarFallback>
+                          {doctor.firstName[0]}{doctor.lastName[0]}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-sm text-foreground">
+                          Dr. {doctor.firstName} {doctor.lastName}
+                        </p>
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {doctor.specialty.replace('-', ' ')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium text-foreground">
+                        ⭐ {doctor.rating}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {doctor.reviewCount} reviews
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}

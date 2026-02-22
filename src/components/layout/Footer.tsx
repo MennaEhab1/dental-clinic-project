@@ -1,0 +1,174 @@
+import { Link } from 'react-router-dom';
+import { 
+  Phone, 
+  Mail, 
+  MapPin, 
+  Facebook, 
+  Twitter, 
+  Instagram, 
+  Linkedin,
+  Clock
+} from 'lucide-react';
+
+const footerLinks = {
+  services: [
+    { label: 'General Dentistry', href: '/services#general' },
+    { label: 'Cosmetic Dentistry', href: '/services#cosmetic' },
+    { label: 'Orthodontics', href: '/services#orthodontics' },
+    { label: 'Oral Surgery', href: '/services#surgery' },
+    { label: 'Pediatric Dentistry', href: '/services#pediatric' },
+  ],
+  quickLinks: [
+    { label: 'About Us', href: '/about' },
+    { label: 'Our Doctors', href: '/doctors' },
+    { label: 'Book Appointment', href: '/booking' },
+    { label: 'Patient Portal', href: '/login' },
+    { label: 'Contact', href: '/contact' },
+  ],
+  legal: [
+    { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Terms of Service', href: '/terms' },
+    { label: 'HIPAA Compliance', href: '/hipaa' },
+  ],
+};
+
+const socialLinks = [
+  { icon: Facebook, href: '#', label: 'Facebook' },
+  { icon: Twitter, href: '#', label: 'Twitter' },
+  { icon: Instagram, href: '#', label: 'Instagram' },
+  { icon: Linkedin, href: '#', label: 'LinkedIn' },
+];
+
+export function Footer() {
+  return (
+    <footer className="bg-card border-t border-border">
+      <div className="container mx-auto px-4 py-12 md:py-16">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
+          {/* Brand & Contact */}
+          <div className="lg:col-span-1">
+            <Link to="/" className="flex items-center gap-2 mb-4">
+              <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
+                <span className="text-xl font-bold text-primary-foreground">D</span>
+              </div>
+              <span className="text-xl font-display font-bold text-foreground">
+                Dental<span className="gradient-text">Care</span>
+              </span>
+            </Link>
+            <p className="text-muted-foreground text-sm mb-6">
+              Providing exceptional dental care with compassion and expertise for over 15 years.
+            </p>
+            <div className="space-y-3">
+              <a
+                href="tel:+15551234567"
+                className="flex items-center gap-3 text-sm text-muted-foreground hover:text-primary transition-colors"
+              >
+                <Phone className="w-4 h-4 text-primary" />
+                +1 555-123-4567
+              </a>
+              <a
+                href="mailto:info@dentalcare.com"
+                className="flex items-center gap-3 text-sm text-muted-foreground hover:text-primary transition-colors"
+              >
+                <Mail className="w-4 h-4 text-primary" />
+                info@dentalcare.com
+              </a>
+              <div className="flex items-start gap-3 text-sm text-muted-foreground">
+                <MapPin className="w-4 h-4 text-primary mt-0.5" />
+                <span>123 Dental Avenue, Suite 100<br />New York, NY 10001</span>
+              </div>
+              <div className="flex items-start gap-3 text-sm text-muted-foreground">
+                <Clock className="w-4 h-4 text-primary mt-0.5" />
+                <span>Mon - Fri: 8AM - 6PM<br />Sat: 9AM - 2PM</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Services */}
+          <div>
+            <h4 className="font-display font-semibold text-foreground mb-4">Our Services</h4>
+            <ul className="space-y-2">
+              {footerLinks.services.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    to={link.href}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Quick Links */}
+          <div>
+            <h4 className="font-display font-semibold text-foreground mb-4">Quick Links</h4>
+            <ul className="space-y-2">
+              {footerLinks.quickLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    to={link.href}
+                    className="text-sm text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Newsletter */}
+          <div>
+            <h4 className="font-display font-semibold text-foreground mb-4">Stay Updated</h4>
+            <p className="text-sm text-muted-foreground mb-4">
+              Subscribe to our newsletter for dental tips and updates.
+            </p>
+            <form className="space-y-3">
+              <input
+                type="email"
+                placeholder="Enter your email"
+                className="w-full px-4 py-2 rounded-lg bg-background border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
+              <button
+                type="submit"
+                className="w-full px-4 py-2 rounded-lg gradient-bg text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                Subscribe
+              </button>
+            </form>
+            <div className="flex items-center gap-4 mt-6">
+              {socialLinks.map((social) => (
+                <a
+                  key={social.label}
+                  href={social.href}
+                  aria-label={social.label}
+                  className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                >
+                  <social.icon className="w-4 h-4" />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Bar */}
+        <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            © {new Date().getFullYear()} DentalCare. All rights reserved.
+          </p>
+          <div className="flex items-center gap-6">
+            {footerLinks.legal.map((link) => (
+              <Link
+                key={link.href}
+                to={link.href}
+                className="text-sm text-muted-foreground hover:text-primary transition-colors"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}

@@ -1,94 +1,121 @@
-import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { MainLayout } from '@/components/layout/MainLayout';
-import { DoctorCard } from '@/components/doctors/DoctorCard';
-import { ServiceCard } from '@/components/services/ServiceCard';
-import { 
-  Calendar, 
-  Shield, 
-  Clock, 
-  Star, 
-  CheckCircle, 
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { MainLayout } from "@/components/layout/MainLayout";
+import { DoctorCard } from "@/components/doctors/DoctorCard";
+import { ServiceCard } from "@/components/services/ServiceCard";
+import {
+  Calendar,
+  Shield,
+  Clock,
+  Star,
+  CheckCircle,
   ArrowRight,
   Stethoscope,
   Sparkles,
   Users,
-  Award
-} from 'lucide-react';
-import { mockDoctors, mockServices } from '@/services/mockData';
+  Award,
+} from "lucide-react";
+import { doctorService, serviceService } from "@/services/api";
+import type { Doctor, Service } from "@/types";
 
 const fadeInUp = {
   initial: { opacity: 0, y: 30 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.6 }
+  transition: { duration: 0.6 },
 };
 
 const stagger = {
   animate: {
     transition: {
-      staggerChildren: 0.1
-    }
-  }
+      staggerChildren: 0.1,
+    },
+  },
 };
 
 const features = [
   {
     icon: Shield,
-    title: 'Safe & Sterile',
-    description: 'State-of-the-art sterilization and infection control protocols.',
+    title: "Safe & Sterile",
+    description:
+      "State-of-the-art sterilization and infection control protocols.",
   },
   {
     icon: Clock,
-    title: 'Flexible Hours',
-    description: 'Extended hours and weekend appointments available.',
+    title: "Flexible Hours",
+    description: "Extended hours and weekend appointments available.",
   },
   {
     icon: Star,
-    title: 'Expert Team',
-    description: 'Board-certified specialists with years of experience.',
+    title: "Expert Team",
+    description: "Board-certified specialists with years of experience.",
   },
   {
     icon: CheckCircle,
-    title: 'Modern Technology',
-    description: 'Latest dental technology for accurate diagnosis.',
+    title: "Modern Technology",
+    description: "Latest dental technology for accurate diagnosis.",
   },
 ];
 
 const stats = [
-  { value: '15+', label: 'Years Experience' },
-  { value: '50K+', label: 'Happy Patients' },
-  { value: '12', label: 'Expert Dentists' },
-  { value: '98%', label: 'Success Rate' },
+  { value: "15+", label: "Years Experience" },
+  { value: "50K+", label: "Happy Patients" },
+  { value: "12", label: "Expert Dentists" },
+  { value: "98%", label: "Success Rate" },
 ];
 
 const testimonials = [
   {
-    name: 'Sarah Mitchell',
-    role: 'Patient',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face',
-    content: 'The best dental experience I\'ve ever had. The staff is incredibly friendly and the results exceeded my expectations.',
+    name: "Sarah Mitchell",
+    role: "Patient",
+    avatar:
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face",
+    content:
+      "The best dental experience I've ever had. The staff is incredibly friendly and the results exceeded my expectations.",
     rating: 5,
   },
   {
-    name: 'Michael Torres',
-    role: 'Patient',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face',
-    content: 'Dr. Chen\'s orthodontic treatment completely transformed my smile. I couldn\'t be happier with the results!',
+    name: "Michael Torres",
+    role: "Patient",
+    avatar:
+      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face",
+    content:
+      "Dr. Chen's orthodontic treatment completely transformed my smile. I couldn't be happier with the results!",
     rating: 5,
   },
   {
-    name: 'Emily Parker',
-    role: 'Patient',
-    avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face',
-    content: 'My kids actually look forward to their dental visits now. Dr. Patel makes everything so fun and comfortable for them.',
+    name: "Emily Parker",
+    role: "Patient",
+    avatar:
+      "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face",
+    content:
+      "My kids actually look forward to their dental visits now. Dr. Patel makes everything so fun and comfortable for them.",
     rating: 5,
   },
 ];
 
 export default function LandingPage() {
-  const featuredDoctors = mockDoctors.slice(0, 3);
-  const featuredServices = mockServices.slice(0, 4);
+  const [featuredDoctors, setFeaturedDoctors] = useState<Doctor[]>([]);
+  const [featuredServices, setFeaturedServices] = useState<Service[]>([]);
+
+  useEffect(() => {
+    const loadFeaturedData = async () => {
+      try {
+        const [doctorsRes, servicesRes] = await Promise.all([
+          doctorService.getAll(),
+          serviceService.getAll(),
+        ]);
+
+        setFeaturedDoctors(doctorsRes.data.slice(0, 3));
+        setFeaturedServices(servicesRes.data.slice(0, 4));
+      } catch (error) {
+        console.error("Failed to load landing data", error);
+      }
+    };
+
+    loadFeaturedData();
+  }, []);
 
   return (
     <MainLayout>
@@ -106,13 +133,13 @@ export default function LandingPage() {
                 Trusted by 50,000+ patients
               </div>
               <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold text-foreground leading-tight mb-6">
-                Your Perfect Smile{' '}
+                Your Perfect Smile{" "}
                 <span className="gradient-text">Starts Here</span>
               </h1>
               <p className="text-lg text-muted-foreground mb-8 max-w-lg">
-                Experience exceptional dental care with our team of expert dentists. 
-                From routine checkups to advanced treatments, we're here to give you 
-                the smile you deserve.
+                Experience exceptional dental care with our team of expert
+                dentists. From routine checkups to advanced treatments, we're
+                here to give you the smile you deserve.
               </p>
               <div className="flex flex-wrap gap-4">
                 <Link to="/booking">
@@ -128,7 +155,7 @@ export default function LandingPage() {
                   </Button>
                 </Link>
               </div>
-              
+
               {/* Quick Stats */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12">
                 {stats.map((stat, index) => (
@@ -142,7 +169,9 @@ export default function LandingPage() {
                     <p className="text-2xl md:text-3xl font-display font-bold gradient-text">
                       {stat.value}
                     </p>
-                    <p className="text-sm text-muted-foreground">{stat.label}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {stat.label}
+                    </p>
                   </motion.div>
                 ))}
               </div>
@@ -162,7 +191,7 @@ export default function LandingPage() {
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
               </div>
-              
+
               {/* Floating Cards */}
               <motion.div
                 animate={{ y: [0, -10, 0] }}
@@ -175,7 +204,9 @@ export default function LandingPage() {
                   </div>
                   <div>
                     <p className="font-semibold text-foreground">Expert Care</p>
-                    <p className="text-sm text-muted-foreground">12 Specialists</p>
+                    <p className="text-sm text-muted-foreground">
+                      12 Specialists
+                    </p>
                   </div>
                 </div>
               </motion.div>
@@ -199,7 +230,10 @@ export default function LandingPage() {
                   <div className="ml-2">
                     <div className="flex items-center gap-1">
                       {[1, 2, 3, 4, 5].map((i) => (
-                        <Star key={i} className="w-3 h-3 text-warning fill-warning" />
+                        <Star
+                          key={i}
+                          className="w-3 h-3 text-warning fill-warning"
+                        />
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground">4.9 Rating</p>
@@ -222,7 +256,7 @@ export default function LandingPage() {
               Why Choose <span className="gradient-text">DentalCare</span>?
             </h2>
             <p className="text-muted-foreground">
-              We combine expertise, technology, and compassion to deliver 
+              We combine expertise, technology, and compassion to deliver
               exceptional dental care for you and your family.
             </p>
           </motion.div>
@@ -246,7 +280,9 @@ export default function LandingPage() {
                 <h3 className="font-display font-semibold text-lg text-foreground mb-2">
                   {feature.title}
                 </h3>
-                <p className="text-sm text-muted-foreground">{feature.description}</p>
+                <p className="text-sm text-muted-foreground">
+                  {feature.description}
+                </p>
               </motion.div>
             ))}
           </motion.div>
@@ -265,7 +301,8 @@ export default function LandingPage() {
                 Our <span className="gradient-text">Services</span>
               </h2>
               <p className="text-muted-foreground max-w-lg">
-                Comprehensive dental services to meet all your oral health needs.
+                Comprehensive dental services to meet all your oral health
+                needs.
               </p>
             </div>
             <Link to="/services">
@@ -304,7 +341,8 @@ export default function LandingPage() {
                 Meet Our <span className="gradient-text">Experts</span>
               </h2>
               <p className="text-muted-foreground max-w-lg">
-                Our team of experienced dentists is committed to your oral health.
+                Our team of experienced dentists is committed to your oral
+                health.
               </p>
             </div>
             <Link to="/doctors">
@@ -358,10 +396,15 @@ export default function LandingPage() {
               >
                 <div className="flex items-center gap-1 mb-4">
                   {[...Array(testimonial.rating)].map((_, i) => (
-                    <Star key={i} className="w-4 h-4 text-warning fill-warning" />
+                    <Star
+                      key={i}
+                      className="w-4 h-4 text-warning fill-warning"
+                    />
                   ))}
                 </div>
-                <p className="text-muted-foreground mb-6">{testimonial.content}</p>
+                <p className="text-muted-foreground mb-6">
+                  {testimonial.content}
+                </p>
                 <div className="flex items-center gap-3">
                   <img
                     src={testimonial.avatar}
@@ -369,8 +412,12 @@ export default function LandingPage() {
                     className="w-12 h-12 rounded-full object-cover"
                   />
                   <div>
-                    <p className="font-semibold text-foreground">{testimonial.name}</p>
-                    <p className="text-sm text-muted-foreground">{testimonial.role}</p>
+                    <p className="font-semibold text-foreground">
+                      {testimonial.name}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {testimonial.role}
+                    </p>
                   </div>
                 </div>
               </motion.div>
@@ -393,7 +440,7 @@ export default function LandingPage() {
                 Ready for Your Best Smile?
               </h2>
               <p className="text-primary-foreground/80 mb-8">
-                Schedule your appointment today and take the first step towards 
+                Schedule your appointment today and take the first step towards
                 a healthier, brighter smile. New patients welcome!
               </p>
               <div className="flex flex-wrap gap-4">
@@ -404,17 +451,27 @@ export default function LandingPage() {
                   </Button>
                 </Link>
                 <a href="tel:+15551234567">
-                  <Button size="lg" variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
+                  >
                     Call Us Now
                   </Button>
                 </a>
               </div>
             </div>
-            
+
             {/* Decorative elements */}
             <div className="absolute right-0 top-0 w-1/3 h-full opacity-10">
               <svg viewBox="0 0 200 200" className="w-full h-full">
-                <circle cx="100" cy="100" r="80" fill="currentColor" className="text-primary-foreground" />
+                <circle
+                  cx="100"
+                  cy="100"
+                  r="80"
+                  fill="currentColor"
+                  className="text-primary-foreground"
+                />
               </svg>
             </div>
           </motion.div>

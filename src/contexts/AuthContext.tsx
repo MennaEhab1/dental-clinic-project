@@ -10,12 +10,64 @@ import { authService } from "@/services/api";
 
 // Backend UserDTO structure: { userName, email, role, token, userId?, id? }
 interface BackendUser {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
   userName: string;
   email: string;
   role: string;
   token: string;
   userId?: string; // Patient/User ID from backend
   id?: string; // Alternative ID field name
+}
+
+function normalizeRole(role?: string): "patient" | "doctor" | "admin" {
+  const normalized = (role || "patient").toLowerCase();
+  if (normalized.includes("admin")) return "admin";
+  if (normalized.includes("doctor") || normalized.includes("dentist")) {
+    return "doctor";
+  }
+  return "patient";
+}
+
+function normalizeBackendUser(raw: BackendUser): BackendUser {
+  const userName = raw.userName || "";
+  const normalizedUserName = userName
+    .replace(/[_\-.]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+  const parts = normalizedUserName.split(/\s+/).filter(Boolean);
+
+  const explicitFirstName = (raw.firstName || "").trim();
+  const explicitLastName = (raw.lastName || "").trim();
+
+  let firstNameFromResponse = explicitFirstName;
+  let lastNameFromResponse = explicitLastName;
+
+  if (explicitFirstName && !explicitLastName) {
+    const firstNameParts = explicitFirstName
+      .replace(/[_\-.]+/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (firstNameParts.length > 1) {
+      firstNameFromResponse = firstNameParts[0];
+      lastNameFromResponse = firstNameParts.slice(1).join(" ");
+    }
+  }
+
+  const firstNameFromUserName = parts[0] || "";
+  const lastNameFromUserName = parts.slice(1).join(" ");
+
+  return {
+    ...raw,
+    id: raw.id || raw.userId,
+    userId: raw.userId || raw.id,
+    role: normalizeRole(raw.role),
+    firstName: firstNameFromResponse || firstNameFromUserName,
+    lastName: lastNameFromResponse || lastNameFromUserName,
+  };
 }
 
 interface AuthContextType {
@@ -40,7 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const storedUserJson = localStorage.getItem("auth_user");
         if (storedUserJson) {
-          const storedUser = JSON.parse(storedUserJson) as BackendUser;
+          const storedUser = normalizeBackendUser(
+            JSON.parse(storedUserJson) as BackendUser,
+          );
           console.debug(
             "[AuthContext] Restored user from localStorage:",
             storedUser.userName,
@@ -79,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const response = await authService.login(credentials);
-      const userData = response.data as BackendUser;
+      const userData = normalizeBackendUser(response.data as BackendUser);
       // Store user data in memory and localStorage
       setUser(userData);
       try {
@@ -105,8 +159,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const response = await authService.register(data);
-      const userData = response.data as BackendUser;
-      // Store user data in memory and localStorage
+      const userData = normalizeBackendUser(response.data as BackendUser);
+
+      // Check if token was returned
+      if (!userData || !userData.token) {
+        // Registration succeeded but no token - likely email confirmation required
+        console.warn(
+          "[AuthContext] ⚠️  Registration succeeded but backend requires email confirmation",
+        );
+        console.warn(
+          "[AuthContext] User must confirm their email before they can log in",
+        );
+
+        // Store minimal user info but don't set authenticated state
+        // The error message will inform the user to check their email
+        const errorMsg =
+          "Registration successful! Please check your email to confirm your account before logging in.";
+        throw new Error(errorMsg);
+      }
+
+      // Token was returned - normal flow continues
       setUser(userData);
       try {
         localStorage.setItem("auth_user", JSON.stringify(userData));
@@ -118,6 +190,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         );
       }
       // Token is stored in authService/api.ts and attached to future requests
+
+      // ===== PATIENT DATA SYNC DEBUG =====
+      // After successful registration, attempt to fetch patient data
+      // to verify the patient record exists in the backend patient table
+      console.warn(
+        "[AuthContext] 🔍 CHECKING PATIENT DATA SYNC - Attempting to verify patient record was created...",
+      );
+
+      try {
+        const checkResult = await authService.verifyPatientExists();
+        if (checkResult.success) {
+          console.log(
+            "✅ [AuthContext] Patient record verified - Patient data exists in backend!",
+            checkResult.data,
+          );
+        } else {
+          console.error(
+            "❌ [AuthContext] Patient record NOT found - Backend patient table may be out of sync",
+            checkResult,
+          );
+        }
+      } catch (verifyError) {
+        console.error(
+          "⚠️ [AuthContext] Failed to verify patient record:",
+          verifyError,
+        );
+      }
+      // ===== END DEBUG =====
     } catch (err) {
       throw err;
     } finally {

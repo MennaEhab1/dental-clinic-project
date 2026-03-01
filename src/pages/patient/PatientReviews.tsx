@@ -25,8 +25,12 @@ import {
   Send,
   Calendar,
 } from "lucide-react";
-import type { Review, Doctor } from "@/types";
-import { reviewService, doctorService } from "@/services/api";
+import type { Review, Doctor, Appointment } from "@/types";
+import {
+  reviewService,
+  doctorService,
+  appointmentService,
+} from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface ReviewWithAppointment extends Review {
@@ -54,6 +58,7 @@ export default function PatientReviews() {
     comment: "",
   });
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -82,10 +87,18 @@ export default function PatientReviews() {
           );
           setDoctors([]);
         }
+
+        const appointmentsResult = await appointmentService.getByPatient();
+        if (appointmentsResult.success && appointmentsResult.data) {
+          setAppointments(appointmentsResult.data);
+        } else {
+          setAppointments([]);
+        }
       } catch (error) {
         console.error("[PatientReviews] Error:", error);
         setReviews([]);
         setDoctors([]);
+        setAppointments([]);
       } finally {
         setIsLoading(false);
       }
@@ -93,6 +106,34 @@ export default function PatientReviews() {
 
     fetchReviews();
   }, [user]);
+
+  const getReviewAppointmentIdForDoctor = (doctorId: string): string | null => {
+    const doctorAppointments = appointments.filter(
+      (appointment) => String(appointment.doctorId) === String(doctorId),
+    );
+
+    if (doctorAppointments.length === 0) return null;
+
+    const completedAppointment = doctorAppointments.find(
+      (appointment) => appointment.status === "completed",
+    );
+
+    return String((completedAppointment || doctorAppointments[0]).id);
+  };
+
+  const eligibleDoctors = doctors.filter((doctor) => {
+    if (!doctor) return false;
+
+    const hasAppointmentWithDoctor = appointments.some(
+      (appointment) => String(appointment.doctorId) === String(doctor.id),
+    );
+
+    const alreadyReviewed = reviews.some(
+      (review) => String(review.doctorId) === String(doctor.id),
+    );
+
+    return hasAppointmentWithDoctor && !alreadyReviewed;
+  });
 
   const handleSubmitReview = async () => {
     if (
@@ -123,8 +164,19 @@ export default function PatientReviews() {
         }
       } else {
         // Add new review
+        const appointmentId = getReviewAppointmentIdForDoctor(
+          formData.doctorId,
+        );
+        if (!appointmentId) {
+          alert(
+            "You can only submit a review for doctors you have an appointment with.",
+          );
+          return;
+        }
+
         const result = await reviewService.addReview({
           doctorId: formData.doctorId,
+          appointmentId,
           rating: formData.rating,
           comment: formData.comment,
         });
@@ -224,7 +276,21 @@ export default function PatientReviews() {
               Share your experience and help others
             </p>
           </div>
-          <Button onClick={() => handleNewReview("", "")} className="gap-2">
+          <Button
+            onClick={() => {
+              if (eligibleDoctors.length === 0) {
+                alert("No eligible doctors to review yet.");
+                return;
+              }
+
+              const doctor = eligibleDoctors[0];
+              handleNewReview(
+                doctor.id,
+                `Dr. ${doctor.firstName} ${doctor.lastName}`,
+              );
+            }}
+            className="gap-2"
+          >
             <MessageSquare className="w-4 h-4" />
             Write Review
           </Button>
@@ -245,7 +311,18 @@ export default function PatientReviews() {
                 <Button
                   variant="outline"
                   className="mt-4"
-                  onClick={() => handleNewReview("", "")}
+                  onClick={() => {
+                    if (eligibleDoctors.length === 0) {
+                      alert("No eligible doctors to review yet.");
+                      return;
+                    }
+
+                    const doctor = eligibleDoctors[0];
+                    handleNewReview(
+                      doctor.id,
+                      `Dr. ${doctor.firstName} ${doctor.lastName}`,
+                    );
+                  }}
                 >
                   Write Your First Review
                 </Button>
@@ -338,61 +415,57 @@ export default function PatientReviews() {
         </div>
 
         {/* Available Doctors for Review */}
-        {doctors.length > 0 && (
+        {eligibleDoctors.length > 0 && (
           <div>
             <Separator />
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mt-6 mb-4">
               You can review these doctors
             </h2>
             <div className="grid gap-4">
-              {doctors
-                .filter(
-                  (doc) => doc && !reviews.some((r) => r.doctorId === doc.id),
-                )
-                .map((doctor, index) => (
-                  <motion.div
-                    key={doctor?.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <Card>
-                      <CardContent className="pt-6">
-                        <div className="flex items-center justify-between gap-4">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-12 w-12">
-                              <AvatarImage src={doctor?.avatar} />
-                              <AvatarFallback>
-                                {doctor?.firstName?.[0]}
-                                {doctor?.lastName?.[0]}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <h3 className="font-semibold text-gray-900 dark:text-white">
-                                Dr. {doctor?.firstName} {doctor?.lastName}
-                              </h3>
-                              <p className="text-sm text-gray-600 dark:text-gray-400">
-                                {doctor?.specialty || "General Dentistry"}
-                              </p>
-                            </div>
+              {eligibleDoctors.map((doctor, index) => (
+                <motion.div
+                  key={doctor?.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-12 w-12">
+                            <AvatarImage src={doctor?.avatar} />
+                            <AvatarFallback>
+                              {doctor?.firstName?.[0]}
+                              {doctor?.lastName?.[0]}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <h3 className="font-semibold text-gray-900 dark:text-white">
+                              Dr. {doctor?.firstName} {doctor?.lastName}
+                            </h3>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              {doctor?.specialty || "General Dentistry"}
+                            </p>
                           </div>
-                          <Button
-                            onClick={() =>
-                              handleNewReview(
-                                doctor?.id || "",
-                                `Dr. ${doctor?.firstName} ${doctor?.lastName}`,
-                              )
-                            }
-                            className="gap-2"
-                          >
-                            <Star className="w-4 h-4" />
-                            Write Review
-                          </Button>
                         </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                ))}
+                        <Button
+                          onClick={() =>
+                            handleNewReview(
+                              doctor?.id || "",
+                              `Dr. ${doctor?.firstName} ${doctor?.lastName}`,
+                            )
+                          }
+                          className="gap-2"
+                        >
+                          <Star className="w-4 h-4" />
+                          Write Review
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
             </div>
           </div>
         )}

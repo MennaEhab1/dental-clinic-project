@@ -1,16 +1,14 @@
-import { motion } from 'framer-motion';
-import { Link, useLocation } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { ThemeToggle } from '@/components/common/ThemeToggle';
-import { Menu, X, Phone, Calendar } from 'lucide-react';
-import { useState } from 'react';
+import { motion } from "framer-motion";
+import { Link, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/common/ThemeToggle";
+import { Menu, X, Phone, Calendar } from "lucide-react";
+import { useState } from "react";
 
 const navLinks = [
-  { href: '/', label: 'Home' },
-  { href: '/services', label: 'Services' },
-  { href: '/doctors', label: 'Doctors' },
-  { href: '/about', label: 'About' },
-  { href: '/contact', label: 'Contact' },
+  { href: "/", label: "Home" },
+  { href: "/services", label: "Services" },
+  { href: "/doctors", label: "Doctors" },
 ];
 
 export function Header() {
@@ -28,7 +26,9 @@ export function Header() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-xl font-bold text-primary-foreground">D</span>
+              <span className="text-xl font-bold text-primary-foreground">
+                D
+              </span>
             </div>
             <span className="text-xl font-display font-bold text-foreground">
               Dental<span className="gradient-text">Care</span>
@@ -43,8 +43,8 @@ export function Header() {
                 to={link.href}
                 className={`text-sm font-medium transition-colors hover:text-primary ${
                   location.pathname === link.href
-                    ? 'text-primary'
-                    : 'text-muted-foreground'
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 }`}
               >
                 {link.label}
@@ -83,7 +83,11 @@ export function Header() {
               size="icon"
               onClick={() => setIsOpen(!isOpen)}
             >
-              {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {isOpen ? (
+                <X className="w-5 h-5" />
+              ) : (
+                <Menu className="w-5 h-5" />
+              )}
             </Button>
           </div>
         </div>
@@ -92,7 +96,7 @@ export function Header() {
         {isOpen && (
           <motion.nav
             initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
+            animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             className="md:hidden py-4 border-t border-border"
           >
@@ -104,8 +108,8 @@ export function Header() {
                   onClick={() => setIsOpen(false)}
                   className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                     location.pathname === link.href
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-muted-foreground hover:bg-muted'
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
                   {link.label}

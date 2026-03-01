@@ -8,6 +8,7 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Calendar,
   Clock,
@@ -24,6 +25,9 @@ import { useAuth } from "@/contexts/AuthContext";
 
 export default function PatientDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [patientSyncMessage, setPatientSyncMessage] = useState<string | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
   const { user, isLoading: authIsLoading } = useAuth();
 
@@ -42,19 +46,18 @@ export default function PatientDashboard() {
     }
 
     try {
-      console.debug(
-        "[PatientDashboard] Fetching appointments for current patient",
-      );
       const response = await appointmentService.getByPatient();
-      console.debug(
-        "[PatientDashboard] Appointments fetched:",
-        response.data.length,
-        "appointments",
-      );
+
+      if (!response.success && response.message) {
+        setPatientSyncMessage(response.message);
+      } else {
+        setPatientSyncMessage(null);
+      }
+
       setAppointments(response.data);
     } catch (error) {
-      console.error("[PatientDashboard] Failed to fetch appointments:", error);
       setAppointments([]);
+      setPatientSyncMessage("Failed to load appointments right now.");
     } finally {
       setIsLoading(false);
     }
@@ -119,53 +122,6 @@ export default function PatientDashboard() {
   const pendingCount = appointments.filter(
     (a) => a.status === "pending",
   ).length;
-
-  // Debug logging - VISIBLE IN CONSOLE
-  console.warn(
-    "🚀 [PatientDashboard] APPOINTMENTS LOADED - Total:",
-    appointments.length,
-  );
-  console.table(
-    appointments.map((a) => ({
-      ID: a.id,
-      Status: a.status,
-      Date: a.date,
-      Doctor: a.doctor
-        ? `${a.doctor.firstName} ${a.doctor.lastName}`
-        : "No doctor",
-    })),
-  );
-  console.warn(
-    "📊 [PatientDashboard] COUNTS - Upcoming:",
-    upcomingCount,
-    "| Completed:",
-    completedCount,
-    "| Pending:",
-    pendingCount,
-  );
-  console.debug("[PatientDashboard] Appointment stats:", {
-    total: appointments.length,
-    allAppointments: appointments.map((a) => ({
-      id: a.id,
-      status: a.status,
-      date: a.date,
-      doctorName: a.doctor
-        ? `${a.doctor.firstName} ${a.doctor.lastName}`
-        : "No doctor",
-    })),
-    upcomingCount,
-    completedCount,
-    pendingCount,
-    upcomingAppointments: appointments
-      .filter((a) => a.status === "confirmed" || a.status === "pending")
-      .map((a) => ({ id: a.id, status: a.status })),
-    completedAppointments: appointments
-      .filter((a) => a.status === "completed")
-      .map((a) => ({ id: a.id, status: a.status })),
-    pendingAppointments: appointments
-      .filter((a) => a.status === "pending")
-      .map((a) => ({ id: a.id, status: a.status })),
-  });
 
   const lastVisit = appointments
     .filter((a) => {
@@ -235,6 +191,13 @@ export default function PatientDashboard() {
             </Link>
           </div>
         </motion.div>
+
+        {patientSyncMessage && (
+          <Alert>
+            <AlertTitle>Patient profile missing in backend</AlertTitle>
+            <AlertDescription>{patientSyncMessage}</AlertDescription>
+          </Alert>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

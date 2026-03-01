@@ -122,12 +122,38 @@ export default function BookingPage() {
   // Autofill patient details from signed-in user
   useEffect(() => {
     if (user) {
+      let cachedProfile: {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        phone?: string;
+      } | null = null;
+
+      try {
+        const rawCachedProfile = localStorage.getItem("patient_profile_cache");
+        if (rawCachedProfile) {
+          cachedProfile = JSON.parse(rawCachedProfile) as {
+            firstName?: string;
+            lastName?: string;
+            email?: string;
+            phone?: string;
+          };
+        }
+      } catch (error) {
+        console.warn(
+          "[BookingPage] Failed to parse cached patient profile",
+          error,
+        );
+      }
+
       setBooking((prev) => ({
         ...prev,
-        firstName: prev.firstName || user.firstName || "",
-        lastName: prev.lastName || user.lastName || "",
-        email: prev.email || user.email || "",
-        phone: prev.phone || user.phone || "",
+        firstName:
+          prev.firstName || user.firstName || cachedProfile?.firstName || "",
+        lastName:
+          prev.lastName || user.lastName || cachedProfile?.lastName || "",
+        email: prev.email || user.email || cachedProfile?.email || "",
+        phone: prev.phone || user.phone || cachedProfile?.phone || "",
       }));
     }
   }, [user]);

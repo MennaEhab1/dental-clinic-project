@@ -1,62 +1,80 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext';
-import { ThemeToggle } from '@/components/common/ThemeToggle';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/contexts/AuthContext";
+import { ThemeToggle } from "@/components/common/ThemeToggle";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-  
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>(
+    {},
+  );
+
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const resolveDashboardRoute = (role?: string) => {
+    const normalizedRole = (role || "").toLowerCase();
+    if (normalizedRole.includes("admin")) return "/admin/dashboard";
+    if (
+      normalizedRole.includes("doctor") ||
+      normalizedRole.includes("dentist")
+    ) {
+      return "/doctor/dashboard";
+    }
+    return "/patient/dashboard";
+  };
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
-    
+
     if (!email) {
-      newErrors.email = 'Email is required';
+      newErrors.email = "Email is required";
     } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Please enter a valid email';
+      newErrors.email = "Please enter a valid email";
     }
-    
+
     if (!password) {
-      newErrors.password = 'Password is required';
+      newErrors.password = "Password is required";
     } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
+      newErrors.password = "Password must be at least 6 characters";
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setIsLoading(true);
     try {
       await login({ email, password });
-      toast.success('Welcome back!');
-      // Navigate based on user role (mock implementation)
-      if (email.includes('doctor') || email.includes('doc')) {
-        navigate('/doctor/dashboard');
-      } else if (email.includes('admin')) {
-        navigate('/admin/dashboard');
-      } else {
-        navigate('/patient/dashboard');
+      toast.success("Welcome back!");
+      const redirectFrom = (location.state as { from?: string } | null)?.from;
+      if (redirectFrom) {
+        navigate(redirectFrom, { replace: true });
+        return;
       }
+
+      const storedUserRaw = localStorage.getItem("auth_user");
+      const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
+      navigate(resolveDashboardRoute(storedUser?.role), { replace: true });
     } catch (error) {
-      toast.error('Invalid credentials. Try using any mock email.');
+      const errorMessage =
+        error instanceof Error ? error.message : "Login failed";
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -69,7 +87,7 @@ export default function LoginPage() {
         <div className="absolute top-4 right-4">
           <ThemeToggle />
         </div>
-        
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -77,13 +95,15 @@ export default function LoginPage() {
         >
           <Link to="/" className="flex items-center justify-center gap-2 mb-8">
             <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-xl font-bold text-primary-foreground">D</span>
+              <span className="text-xl font-bold text-primary-foreground">
+                D
+              </span>
             </div>
             <span className="text-xl font-display font-bold text-foreground">
               Dental<span className="gradient-text">Care</span>
             </span>
           </Link>
-          
+
           <div className="text-center mb-8">
             <h1 className="font-display text-2xl font-bold text-foreground">
               Welcome back
@@ -103,31 +123,30 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className={`mt-2 ${errors.email ? 'border-destructive' : ''}`}
+                  className={`mt-2 ${errors.email ? "border-destructive" : ""}`}
                 />
                 {errors.email && (
-                  <p className="text-sm text-destructive mt-1">{errors.email}</p>
+                  <p className="text-sm text-destructive mt-1">
+                    {errors.email}
+                  </p>
                 )}
               </div>
 
               <div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  <Link
-                    to="/forgot-password"
-                    className="text-sm text-primary hover:underline"
-                  >
-                    Forgot password?
-                  </Link>
+                  <span className="text-sm text-muted-foreground">
+                    Forgot password in API (not added in UI yet)
+                  </span>
                 </div>
                 <div className="relative mt-2">
                   <Input
                     id="password"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
-                    className={errors.password ? 'border-destructive' : ''}
+                    className={errors.password ? "border-destructive" : ""}
                   />
                   <button
                     type="button"
@@ -142,7 +161,9 @@ export default function LoginPage() {
                   </button>
                 </div>
                 {errors.password && (
-                  <p className="text-sm text-destructive mt-1">{errors.password}</p>
+                  <p className="text-sm text-destructive mt-1">
+                    {errors.password}
+                  </p>
                 )}
               </div>
 
@@ -157,7 +178,7 @@ export default function LoginPage() {
                     Signing in...
                   </>
                 ) : (
-                  'Sign in'
+                  "Sign in"
                 )}
               </Button>
             </form>
@@ -169,21 +190,25 @@ export default function LoginPage() {
                 </div>
                 <div className="relative flex justify-center text-sm">
                   <span className="bg-card px-2 text-muted-foreground">
-                    Demo accounts
+                    Backend authentication
                   </span>
                 </div>
               </div>
 
               <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-                <p><strong>Patient:</strong> john.doe@email.com</p>
-                <p><strong>Doctor:</strong> sarah.johnson@dentalcare.com</p>
-                <p className="text-xs">Use any password (6+ chars)</p>
+                <p>Use your real backend account credentials.</p>
+                <p className="text-xs">
+                  If login fails, verify the account first in Swagger.
+                </p>
               </div>
             </div>
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-primary font-medium hover:underline">
+              Don't have an account?{" "}
+              <Link
+                to="/register"
+                className="text-primary font-medium hover:underline"
+              >
                 Sign up
               </Link>
             </p>

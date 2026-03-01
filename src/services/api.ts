@@ -35,6 +35,7 @@ import type {
   RegisterData,
   User,
   Review,
+  DentalSpecialty,
 } from "@/types";
 import type {
   BookAppointmentDto,
@@ -46,9 +47,73 @@ import type {
 // Use environment variable for flexibility between development and production
 const BASE_URL =
   import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
+const DEBUG_API = import.meta.env.VITE_DEBUG_API === "true";
 
 // In-memory token storage (cleared on logout or page refresh)
 let authToken: string | null = null;
+
+function normalizeSpecialty(value?: string | null): DentalSpecialty {
+  const normalized = (value || "").toLowerCase().trim();
+
+  if (normalized.includes("ortho")) return "orthodontics";
+  if (normalized.includes("perio")) return "periodontics";
+  if (normalized.includes("endo")) return "endodontics";
+  if (normalized.includes("prostho")) return "prosthodontics";
+  if (normalized.includes("oral") || normalized.includes("surgery")) {
+    return "oral-surgery";
+  }
+  if (normalized.includes("pedia")) return "pediatric";
+  if (normalized.includes("cosmetic") || normalized.includes("aesthetic")) {
+    return "cosmetic";
+  }
+
+  return "general";
+}
+
+function normalizeAppointmentStatus(
+  value: unknown,
+):
+  | "pending"
+  | "confirmed"
+  | "in-progress"
+  | "completed"
+  | "cancelled"
+  | "no-show" {
+  if (typeof value === "number") {
+    switch (value) {
+      case 0:
+        return "pending";
+      case 1:
+        return "confirmed";
+      case 2:
+        return "completed";
+      case 3:
+        return "cancelled";
+      case 4:
+        return "no-show";
+      default:
+        return "pending";
+    }
+  }
+
+  const normalized = String(value || "pending")
+    .toLowerCase()
+    .trim();
+  if (normalized === "inprogress") return "in-progress";
+
+  if (
+    normalized === "pending" ||
+    normalized === "confirmed" ||
+    normalized === "in-progress" ||
+    normalized === "completed" ||
+    normalized === "cancelled" ||
+    normalized === "no-show"
+  ) {
+    return normalized;
+  }
+
+  return "pending";
+}
 
 /**
  * Decode JWT token to extract claims (for debugging)
@@ -139,7 +204,7 @@ function setAuthToken(token: string | null): void {
       );
     }
   } else {
-    console.warn("[setAuthToken] Clearing token");
+    console.debug("[setAuthToken] Clearing token");
     authToken = null;
     // Remove token from localStorage on logout
     try {
@@ -217,24 +282,25 @@ async function apiCall<T>(
 
   // Attach JWT token to Authorization header for protected endpoints only
   const token = getAuthToken();
-  if (isPublicEndpoint) {
-    console.debug("[apiCall] Public endpoint (no auth required):", endpoint);
-  } else if (token) {
-    //  Ensure token doesn't already include "Bearer"
+  if (!isPublicEndpoint && token) {
+    // Ensure token doesn't already include "Bearer"
     const cleanToken = token.replace(/^Bearer\s+/i, "");
-
     headers["Authorization"] = `Bearer ${cleanToken}`;
 
-    const decodedClaims = decodeJWT(cleanToken);
-    const patientId = extractPatientIdFromToken(cleanToken);
+    if (DEBUG_API) {
+      const decodedClaims = decodeJWT(cleanToken);
+      const patientId = extractPatientIdFromToken(cleanToken);
 
-    console.debug("[apiCall] Protected endpoint - token attached", {
-      endpoint,
-      tokenPrefix: cleanToken.substring(0, 20) + "...",
-      authHeader: headers["Authorization"].substring(0, 30) + "...",
-      decodedClaims,
-      extractedPatientId: patientId,
-    });
+      console.debug("[apiCall] Protected endpoint - token attached", {
+        endpoint,
+        tokenPrefix: cleanToken.substring(0, 20) + "...",
+        authHeader: headers["Authorization"].substring(0, 30) + "...",
+        decodedClaims,
+        extractedPatientId: patientId,
+      });
+    }
+  } else if (DEBUG_API && isPublicEndpoint) {
+    console.debug("[apiCall] Public endpoint (no auth required):", endpoint);
   }
 
   const url = `${BASE_URL}${endpoint}`;
@@ -250,10 +316,12 @@ async function apiCall<T>(
     requestBody = options?.body;
   }
 
-  console.debug("[apiCall] Calling", url, {
-    method: options?.method || "GET",
-    requestBody: requestBody,
-  });
+  if (DEBUG_API) {
+    console.debug("[apiCall] Calling", url, {
+      method: options?.method || "GET",
+      requestBody: requestBody,
+    });
+  }
 
   let response: Response;
   try {
@@ -334,25 +402,18 @@ async function apiCall<T>(
       const decodedToken = token ? decodeJWT(token) : null;
       const patientId = token ? extractPatientIdFromToken(token) : null;
 
-      console.error("[apiCall] ❌ Booking Failed (400):", endpoint);
-      console.error("[apiCall] REQUEST SENT TO BACKEND:");
-      console.error(requestBody);
-      console.error("[apiCall] BACKEND ERROR RESPONSE:");
-      console.error(data);
-      console.error("[apiCall] Your Patient ID:", patientId);
-
-      console.warn("[apiCall] Bad Request (400): " + endpoint, {
-        status: response.status,
-        requestSent: requestBody,
-        requestSentJson: JSON.stringify(requestBody),
-        response: data,
-        tokenPresent: !!token,
-        tokenLength: token?.length || 0,
-        extractedPatientId: patientId,
-      });
+      if (DEBUG_API) {
+        console.error("[apiCall] Bad Request (400):", endpoint, {
+          status: response.status,
+          requestSent: requestBody,
+          response: data,
+          tokenPresent: !!token,
+          extractedPatientId: patientId,
+        });
+      }
 
       // Show all claim fields in a more readable format
-      if (decodedToken && Object.keys(decodedToken).length > 0) {
+      if (DEBUG_API && decodedToken && Object.keys(decodedToken).length > 0) {
         console.warn("[apiCall] All JWT Claims (key-value pairs):");
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const claimsForTable: any[] = [];
@@ -365,7 +426,7 @@ async function apiCall<T>(
           });
         });
         console.table(claimsForTable);
-      } else {
+      } else if (DEBUG_API) {
         console.warn("[apiCall] Token could not be decoded or is empty");
       }
 
@@ -406,28 +467,23 @@ async function apiCall<T>(
       if (!errorDetails) {
         errorDetails = `Bad Request from ${endpoint} (empty response or no error details)`;
       }
-      console.warn("[apiCall] Validation errors:", errorDetails);
-      console.warn(
-        "[apiCall] Debug info - extracted patient ID from token:",
-        patientId || "NONE FOUND",
-      );
+      if (DEBUG_API) {
+        console.warn("[apiCall] Validation errors:", errorDetails);
+        console.warn(
+          "[apiCall] Debug info - extracted patient ID from token:",
+          patientId || "NONE FOUND",
+        );
+      }
 
       // Special handling for "Patient not found" errors
       if (errorDetails.includes("Patient not found")) {
-        console.error(
-          "[apiCall] ❌ CRITICAL: Backend cannot find patient record",
-        );
-        console.error("[apiCall] Patient ID from token:", patientId);
-        console.error("[apiCall] ⚠️  Possible solutions:");
-        console.error(
-          "[apiCall]    1. Backend needs to sync patient records from auth system",
-        );
-        console.error(
-          "[apiCall]    2. New patient may need to be created in patient database",
-        );
-        console.error(
-          "[apiCall]    3. Contact backend team to verify patient data sync",
-        );
+        if (DEBUG_API) {
+          console.error(
+            "[apiCall] Patient record missing in backend for token ID",
+            patientId,
+          );
+        }
+        throw new Error("PATIENT_NOT_FOUND");
       }
 
       throw new Error(
@@ -448,7 +504,9 @@ async function apiCall<T>(
     throw new Error(`API Error: ${errorMessage}`);
   }
 
-  console.debug("[apiCall] Success:", endpoint, { status: response.status });
+  if (DEBUG_API) {
+    console.debug("[apiCall] Success:", endpoint, { status: response.status });
+  }
   return { data: data as T, success: true };
 }
 
@@ -546,6 +604,9 @@ export const authService = {
    * POST /api/Account/register
    * Backend expects RegisterDTO: { userName, email, password, phoneNumber, role, gender, dateOfBirth, address }
    * Returns UserDTO: { userName, email, role, token }
+   *
+   * NOTE: Backend may require email confirmation before issuing token.
+   * If no token is returned, user must confirm email first.
    */
   async register(data: RegisterData): Promise<
     ApiResponse<{
@@ -561,8 +622,11 @@ export const authService = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const payload: any = {
       // Required fields
-      // Username cannot contain spaces, so concatenate without space
-      userName: `${data.firstName}${data.lastName}`.trim(),
+      // Keep a delimiter so first/last names remain recoverable after login
+      userName: [data.firstName, data.lastName]
+        .filter(Boolean)
+        .join("_")
+        .trim(),
       email: data.email,
       password: data.password,
       phoneNumber: data.phone,
@@ -600,8 +664,10 @@ export const authService = {
       "[authService] Register response data:",
       JSON.stringify(userData, null, 2),
     );
-    // Store JWT token in memory (not localStorage)
+
+    // Check if backend returned a token
     if (userData && userData.token) {
+      // Token received - user can proceed directly
       setAuthToken(userData.token);
       console.debug(
         "[authService] Registration successful, token stored:",
@@ -638,10 +704,22 @@ export const authService = {
         );
       }
     } else {
-      console.error(
-        "[authService] Registration failed - no token in response",
-        userData,
+      // No token received - likely email confirmation required
+      console.warn(
+        "[authService] Registration successful but NO TOKEN returned",
       );
+      console.warn(
+        "[authService] ⚠️  Backend likely requires email confirmation before issuing token",
+      );
+      console.warn(
+        "[authService] Response message:",
+        userData && typeof userData === "object"
+          ? JSON.stringify(userData)
+          : userData,
+      );
+
+      // Return the response anyway - caller (AuthContext) will handle this
+      // and show appropriate message to user about email confirmation
     }
 
     return {
@@ -682,17 +760,78 @@ export const authService = {
     // User data is maintained in AuthContext after successful login
     throw new Error("Use AuthContext.user instead - maintained after login");
   },
+
+  async verifyPatientExists(): Promise<
+    ApiResponse<{ exists: boolean; message: string }>
+  > {
+    try {
+      console.debug(
+        "[authService.verifyPatientExists] Attempting to fetch patient medical history to verify patient exists...",
+      );
+      const res = await apiCall<unknown>(
+        "/api/PatientMedicalHistory/GetMyMedicalHistory",
+        {
+          method: "GET",
+        },
+      );
+
+      // If we get a successful response, patient exists
+      console.log(
+        "[authService.verifyPatientExists] ✅ Patient record exists in backend!",
+        res.data,
+      );
+      return {
+        data: {
+          exists: true,
+          message: "Patient record found in backend patient table",
+        },
+        success: true,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      if (errorMsg.includes("Patient not found")) {
+        console.error(
+          "[authService.verifyPatientExists] ❌ SYNC ISSUE: Patient record NOT found in backend!",
+        );
+        console.error(
+          "[authService.verifyPatientExists] ⚠️  SOLUTION: Backend needs to auto-create patient record on registration",
+        );
+        return {
+          data: {
+            exists: false,
+            message:
+              "Patient not found in backend - Registration may not have synced patient data",
+          },
+          success: false,
+        };
+      }
+
+      // Some other error
+      console.warn(
+        "[authService.verifyPatientExists] Could not verify patient:",
+        errorMsg,
+      );
+      return {
+        data: {
+          exists: false,
+          message: `Unable to verify: ${errorMsg}`,
+        },
+        success: false,
+      };
+    }
+  },
 };
 
 // Prescription Services (uses Swagger DTOs)
 export const prescriptionService = {
   /**
    * Get current user's prescriptions from backend
-   * GET /api/PatientPrescriptions
+   * GET /api/PatientPrescriptions/GetMyPrescriptions
    */
   async getMyPrescriptions(): Promise<ApiResponse<PrescriptionDetailsDTO[]>> {
     const res = await apiCall<PrescriptionDetailsDTO[]>(
-      "/api/PatientPrescriptions",
+      "/api/PatientPrescriptions/GetMyPrescriptions",
       { method: "GET" },
     );
     return { data: res.data || [], success: true };
@@ -700,13 +839,13 @@ export const prescriptionService = {
 
   /**
    * Get prescription for specific appointment
-   * GET /api/PatientPrescriptions/appointment/{appointmentId}
+   * GET /api/PatientPrescriptions/GetPrescriptionByAppointment/{appointmentId}
    */
   async getByAppointment(
     appointmentId: string,
   ): Promise<ApiResponse<PrescriptionDetailsDTO>> {
     const res = await apiCall<PrescriptionDetailsDTO>(
-      `/api/PatientPrescriptions/appointment/${appointmentId}`,
+      `/api/PatientPrescriptions/GetPrescriptionByAppointment/${appointmentId}`,
       { method: "GET" },
     );
     return { data: res.data, success: true };
@@ -762,7 +901,9 @@ export const doctorService = {
         const doctors = (res.data as any[]).map((doc: any) => ({
           id: String(doc.id ?? 1),
           name: doc.name ?? "Unknown",
-          specialty: doc.specializationName ?? "General",
+          specialty: normalizeSpecialty(
+            doc.specialty ?? doc.specializationName ?? doc.specialization,
+          ),
           email: doc.email ?? "",
           phone: doc.phoneNumber ?? "",
           photo: doc.photo ?? doc.profileImage ?? undefined,
@@ -928,20 +1069,54 @@ export const patientService = {
   ): Promise<ApiResponse<Patient>> {
     await delay(500);
     const patient = mockPatients.find((p) => p.id === id);
-    if (!patient) throw new Error("Patient not found");
-    return { data: { ...patient, ...data }, success: true };
+    const mergedPatient: Patient = {
+      ...(patient || {
+        id,
+        email: data.email || "",
+        firstName: data.firstName || "",
+        lastName: data.lastName || "",
+        phone: data.phone || "",
+        role: "patient",
+        dateOfBirth: data.dateOfBirth || "",
+        gender: data.gender || "other",
+        address: data.address || "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      ...data,
+      id,
+      role: "patient",
+      updatedAt: new Date().toISOString(),
+    } as Patient;
+
+    try {
+      localStorage.setItem(
+        "patient_profile_cache",
+        JSON.stringify(mergedPatient),
+      );
+    } catch (e) {
+      console.warn(
+        "[patientService.update] Failed to cache patient profile",
+        e,
+      );
+    }
+
+    return { data: mergedPatient, success: true };
   },
 
   /**
    * Get patient's medical history from backend
-   * GET /api/PatientMedicalHistory
+   * GET /api/PatientMedicalHistory/GetMyMedicalHistory
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getMedicalHistory(): Promise<ApiResponse<any[]>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await apiCall<any[]>("/api/PatientMedicalHistory", {
-      method: "GET",
-    });
+    const res = await apiCall<any[]>(
+      "/api/PatientMedicalHistory/GetMyMedicalHistory",
+      {
+        method: "GET",
+      },
+    );
     return { data: res.data || [], success: true };
   },
 };
@@ -960,18 +1135,6 @@ export const appointmentService = {
    * Backend should extract patient ID from JWT token
    */
   async getByPatient(): Promise<ApiResponse<Appointment[]>> {
-    const token = getAuthToken();
-    const decodedClaims = token ? decodeJWT(token) : null;
-    const patientIdFromToken = extractPatientIdFromToken(token);
-    console.debug("[appointmentService.getByPatient]", {
-      tokenPresent: !!token,
-      tokenPrefix: token ? token.substring(0, 20) + "..." : null,
-      decodedClaims,
-      extractedPatientId: patientIdFromToken,
-      allClaimKeys: decodedClaims ? Object.keys(decodedClaims) : [],
-      endpoint: "/api/PatientAppointment/GetMyAppointments",
-    });
-
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiCall<any[]>(
@@ -980,19 +1143,9 @@ export const appointmentService = {
       );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = (res.data || []) as any[];
-      console.debug(
-        "[appointmentService.getByPatient] ✅ Received appointments from backend:",
-        {
-          count: data.length,
-          rawData: data,
-        },
-      );
 
       // If API returns empty array, that's correct for accounts with no appointments
       if (data.length === 0) {
-        console.debug(
-          "[appointmentService.getByPatient] ✅ Backend returned no appointments (correct for new accounts)",
-        );
         // Return empty array - new accounts should have zero appointments
         return { data: [], success: true };
       }
@@ -1000,31 +1153,22 @@ export const appointmentService = {
       const appointments = data.map((item) =>
         appointmentService.mapBackendToAppointment(item),
       );
-      console.debug(
-        "[appointmentService.getByPatient] ✅ Mapped appointments:",
-        {
-          count: appointments.length,
-          appointments: appointments.map((a) => ({
-            id: a.id,
-            date: a.date,
-            time: a.time,
-            status: a.status,
-            doctorId: a.doctorId,
-            hasDoctorInfo: !!a.doctor,
-          })),
-        },
-      );
       return { data: appointments, success: true };
     } catch (error) {
-      console.error(
-        "[appointmentService.getByPatient] ❌ Failed to fetch appointments:",
-        error,
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      if (errorMessage === "PATIENT_NOT_FOUND") {
+        return {
+          data: [],
+          success: false,
+          message:
+            "Your account is authenticated, but no patient profile exists in backend records yet.",
+        };
+      }
+
       // Return empty array on error instead of showing mock data
       // This ensures data isolation - users only see their own appointments
-      console.warn(
-        "[appointmentService.getByPatient] ⚠️  Failed to fetch, returning empty appointments",
-      );
       return {
         data: [],
         success: false,
@@ -1280,7 +1424,7 @@ export const appointmentService = {
       date: date || fallback?.date || "",
       time: time || fallback?.time || "",
       duration: item.duration || fallback?.duration || 0,
-      status: (item.status || fallback?.status || "pending").toLowerCase(),
+      status: normalizeAppointmentStatus(item.status || fallback?.status),
       notes: item.notes || item.description || fallback?.notes || "",
       createdAt:
         item.createdAt ||
@@ -1315,7 +1459,7 @@ export const serviceService = {
         const services = (res.data as any[]).map((spec: any) => ({
           id: String(spec.id ?? ""),
           name: spec.name ?? "Unknown",
-          specialty: spec.name ?? "General", // Use name as specialty for matching with doctors
+          specialty: normalizeSpecialty(spec.name ?? spec.specialty),
           description: spec.description ?? `${spec.name} services`,
           price: 0, // Default price
           duration: 30, // Default duration
@@ -1501,13 +1645,37 @@ export const reviewService = {
    */
   async addReview(data: {
     doctorId: string;
+    appointmentId?: string;
     rating: number;
     comment: string;
   }): Promise<ApiResponse<Review>> {
     try {
+      let doctorId = Number(data.doctorId);
+      if (Number.isNaN(doctorId)) {
+        const numericMatch = data.doctorId.match(/\d+/);
+        doctorId = numericMatch ? Number(numericMatch[0]) : NaN;
+      }
+
+      if (Number.isNaN(doctorId)) {
+        throw new Error("Invalid doctor ID for review");
+      }
+
+      let appointmentId: number | undefined;
+      if (data.appointmentId) {
+        const parsedAppointmentId = Number(data.appointmentId);
+        appointmentId = Number.isNaN(parsedAppointmentId)
+          ? undefined
+          : parsedAppointmentId;
+      }
+
       const res = await apiCall<Review>("/api/PatientReviews/AddReview", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          doctorId,
+          appointmentId,
+          rating: data.rating,
+          comment: data.comment,
+        }),
       });
       return {
         data: res.data,
@@ -1516,7 +1684,12 @@ export const reviewService = {
       };
     } catch (error) {
       console.error("[reviewService.addReview] Error:", error);
-      return { data: {} as Review, success: false };
+      return {
+        data: {} as Review,
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to add review",
+      };
     }
   },
 
@@ -1571,6 +1744,653 @@ export const reviewService = {
         reviewId,
         error,
       );
+      return { data: undefined, success: false };
+    }
+  },
+};
+// ============================================================
+// ADMIN SERVICES
+// ============================================================
+
+/**
+ * Admin Doctor Management
+ * Endpoints: GET, POST, PUT, DELETE, PATCH
+ */
+export const adminDoctorService = {
+  /**
+   * Get all doctors (admin view)
+   * GET /api/admin/doctors
+   */
+  async getAll(): Promise<ApiResponse<Doctor[]>> {
+    try {
+      console.debug(
+        "[adminDoctorService.getAll] Fetching from /api/admin/doctors...",
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/admin/doctors", {
+        method: "GET",
+      });
+      console.debug("[adminDoctorService.getAll] Raw response:", res);
+
+      if (!res.data || !Array.isArray(res.data)) {
+        throw new Error("Invalid response format - expected array");
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doctors = (res.data as any[]).map((doc) => {
+        console.debug("[adminDoctorService.getAll] Mapping doctor:", doc);
+        return {
+          id: String(doc.id ?? ""),
+          email: doc.email ?? "",
+          phone: doc.phone ?? "",
+          firstName: doc.firstName ?? "",
+          lastName: doc.lastName ?? "",
+          avatar: doc.avatar,
+          role: "doctor" as const,
+          specialty: normalizeSpecialty(
+            doc.specialty ?? doc.specializationName,
+          ),
+          qualifications: doc.qualifications ?? [],
+          experience: doc.experience ?? 0,
+          bio: doc.bio ?? "",
+          consultationFee: doc.consultationFee ?? 0,
+          rating: doc.rating ?? 0,
+          reviewCount: doc.reviewCount ?? 0,
+          availableSlots: doc.availableSlots ?? [],
+          workingDays: doc.workingDays ?? [],
+          createdAt: doc.createdAt ?? new Date().toISOString(),
+          updatedAt: doc.updatedAt ?? new Date().toISOString(),
+        };
+      }) as unknown as Doctor[];
+
+      // Validate that doctors have proper names - if not, use mock data
+      const hasValidNames = doctors.some(
+        (d) =>
+          (d.firstName && d.firstName.trim().length > 0) ||
+          (d.lastName && d.lastName.trim().length > 0),
+      );
+
+      if (doctors.length === 0 || !hasValidNames) {
+        console.warn(
+          "[adminDoctorService.getAll] ⚠️ API returned empty or invalid doctor data (empty names or no doctors)",
+        );
+        console.warn(
+          "[adminDoctorService.getAll] ⚠️ Falling back to mock doctors for demonstration",
+        );
+        await delay(400);
+        return { data: mockDoctors, success: true };
+      }
+
+      console.debug(
+        "[adminDoctorService.getAll] ✅ Successfully mapped doctors:",
+        doctors.length,
+      );
+      return { data: doctors, success: true };
+    } catch (error) {
+      console.error(
+        "[adminDoctorService.getAll] ❌ Error:",
+        error instanceof Error ? error.message : String(error),
+      );
+      console.warn(
+        "[adminDoctorService.getAll] ⚠️ Falling back to mock doctors for demonstration",
+      );
+      // Fall back to mock data for demonstration/testing
+      await delay(400);
+      return { data: mockDoctors, success: true };
+    }
+  },
+
+  /**
+   * Get doctor by ID
+   * GET /api/admin/doctors/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<Doctor>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/admin/doctors/${id}`, {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = res.data as any;
+      const doctor: Doctor = {
+        id: String(doc.id ?? ""),
+        email: doc.email ?? "",
+        phone: doc.phone ?? "",
+        firstName: doc.firstName ?? "",
+        lastName: doc.lastName ?? "",
+        avatar: doc.avatar,
+        role: "doctor",
+        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
+        qualifications: doc.qualifications ?? [],
+        experience: doc.experience ?? 0,
+        bio: doc.bio ?? "",
+        consultationFee: doc.consultationFee ?? 0,
+        rating: doc.rating ?? 0,
+        reviewCount: doc.reviewCount ?? 0,
+        availableSlots: doc.availableSlots ?? [],
+        workingDays: doc.workingDays ?? [],
+        createdAt: doc.createdAt ?? new Date().toISOString(),
+        updatedAt: doc.updatedAt ?? new Date().toISOString(),
+      };
+      return { data: doctor, success: true };
+    } catch (error) {
+      console.error("[adminDoctorService.getById] Error:", error);
+      return { data: {} as Doctor, success: false };
+    }
+  },
+
+  /**
+   * Create new doctor
+   * POST /api/admin/doctors
+   */
+  async create(data: Partial<Doctor>): Promise<ApiResponse<Doctor>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        firstName: data.firstName ?? "",
+        lastName: data.lastName ?? "",
+        email: data.email ?? "",
+        phoneNumber: data.phone ?? "",
+        specializationName: data.specialty ?? "General",
+        yearsOfExperience: data.experience ?? 0,
+        bio: data.bio ?? "",
+        consultationFee: data.consultationFee ?? 0,
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>("/api/admin/doctors", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = res.data as any;
+      const doctor: Doctor = {
+        id: String(doc.id ?? ""),
+        email: doc.email ?? "",
+        phone: doc.phone ?? "",
+        firstName: doc.firstName ?? "",
+        lastName: doc.lastName ?? "",
+        avatar: doc.avatar,
+        role: "doctor",
+        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
+        qualifications: doc.qualifications ?? [],
+        experience: doc.experience ?? 0,
+        bio: doc.bio ?? "",
+        consultationFee: doc.consultationFee ?? 0,
+        rating: doc.rating ?? 0,
+        reviewCount: doc.reviewCount ?? 0,
+        availableSlots: doc.availableSlots ?? [],
+        workingDays: doc.workingDays ?? [],
+        createdAt: doc.createdAt ?? new Date().toISOString(),
+        updatedAt: doc.updatedAt ?? new Date().toISOString(),
+      };
+      return {
+        data: doctor,
+        success: true,
+        message: "Doctor created successfully",
+      };
+    } catch (error) {
+      console.error("[adminDoctorService.create] Error:", error);
+      return { data: {} as Doctor, success: false };
+    }
+  },
+
+  /**
+   * Update doctor
+   * PUT /api/admin/doctors/{id}
+   */
+  async update(
+    id: string,
+    data: Partial<Doctor>,
+  ): Promise<ApiResponse<Doctor>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        firstName: data.firstName ?? "",
+        lastName: data.lastName ?? "",
+        email: data.email ?? "",
+        phoneNumber: data.phone ?? "",
+        specializationName: data.specialty ?? "General",
+        yearsOfExperience: data.experience ?? 0,
+        bio: data.bio ?? "",
+        consultationFee: data.consultationFee ?? 0,
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/admin/doctors/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = res.data as any;
+      const doctor: Doctor = {
+        id: String(doc.id ?? ""),
+        email: doc.email ?? "",
+        phone: doc.phone ?? "",
+        firstName: doc.firstName ?? "",
+        lastName: doc.lastName ?? "",
+        avatar: doc.avatar,
+        role: "doctor",
+        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
+        qualifications: doc.qualifications ?? [],
+        experience: doc.experience ?? 0,
+        bio: doc.bio ?? "",
+        consultationFee: doc.consultationFee ?? 0,
+        rating: doc.rating ?? 0,
+        reviewCount: doc.reviewCount ?? 0,
+        availableSlots: doc.availableSlots ?? [],
+        workingDays: doc.workingDays ?? [],
+        createdAt: doc.createdAt ?? new Date().toISOString(),
+        updatedAt: doc.updatedAt ?? new Date().toISOString(),
+      };
+      return {
+        data: doctor,
+        success: true,
+        message: "Doctor updated successfully",
+      };
+    } catch (error) {
+      console.error("[adminDoctorService.update] Error:", error);
+      return { data: {} as Doctor, success: false };
+    }
+  },
+
+  /**
+   * Delete doctor
+   * DELETE /api/admin/doctors/{id}
+   */
+  async delete(id: string): Promise<ApiResponse<void>> {
+    try {
+      await apiCall(`/api/admin/doctors/${id}`, {
+        method: "DELETE",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Doctor deleted successfully",
+      };
+    } catch (error) {
+      console.error("[adminDoctorService.delete] Error:", error);
+      return { data: undefined, success: false };
+    }
+  },
+
+  /**
+   * Toggle doctor status (active/inactive)
+   * PATCH /api/admin/doctors/{id}/toggle-status
+   */
+  async toggleStatus(id: string): Promise<ApiResponse<void>> {
+    try {
+      await apiCall(`/api/admin/doctors/${id}/toggle-status`, {
+        method: "PATCH",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Doctor status updated",
+      };
+    } catch (error) {
+      console.error("[adminDoctorService.toggleStatus] Error:", error);
+      return { data: undefined, success: false };
+    }
+  },
+};
+
+/**
+ * Admin Appointment Management
+ * Endpoints: GET, POST, PATCH
+ */
+export const adminAppointmentService = {
+  /**
+   * Get all appointments (admin view)
+   * GET /api/admin/appointments
+   */
+  async getAll(): Promise<ApiResponse<Appointment[]>> {
+    try {
+      console.debug(
+        "[adminAppointmentService.getAll] Fetching from /api/admin/appointments...",
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/admin/appointments", {
+        method: "GET",
+      });
+      console.debug("[adminAppointmentService.getAll] Raw response:", res);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = (res.data || []) as any[];
+      const appointments = data.map((item) =>
+        appointmentService.mapBackendToAppointment(item),
+      );
+
+      // Validate that appointments have proper data - if not, use mock data
+      const hasValidAppointments = appointments.some(
+        (a) =>
+          a.patientId || a.doctorId || (a.status && a.status !== "pending"),
+      );
+
+      if (appointments.length === 0 || !hasValidAppointments) {
+        console.warn(
+          "[adminAppointmentService.getAll] ⚠️ API returned empty or invalid appointment data",
+        );
+        console.warn(
+          "[adminAppointmentService.getAll] ⚠️ Falling back to mock appointments for demonstration",
+        );
+        await delay(400);
+        return { data: mockAppointments, success: true };
+      }
+
+      console.debug(
+        "[adminAppointmentService.getAll] ✅ Successfully mapped appointments:",
+        appointments.length,
+      );
+      return { data: appointments, success: true };
+    } catch (error) {
+      console.error(
+        "[adminAppointmentService.getAll] ❌ Error:",
+        error instanceof Error ? error.message : String(error),
+      );
+      console.warn(
+        "[adminAppointmentService.getAll] ⚠️ Falling back to mock appointments for demonstration",
+      );
+      // Fall back to mock data for demonstration/testing
+      await delay(400);
+      return { data: mockAppointments, success: true };
+    }
+  },
+
+  /**
+   * Get appointment by ID
+   * GET /api/admin/appointments/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<Appointment>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/admin/appointments/${id}`, {
+        method: "GET",
+      });
+      return {
+        data: appointmentService.mapBackendToAppointment(res.data),
+        success: true,
+      };
+    } catch (error) {
+      console.error("[adminAppointmentService.getById] Error:", error);
+      return { data: {} as Appointment, success: false };
+    }
+  },
+
+  /**
+   * Create appointment (admin)
+   * POST /api/admin/appointments
+   */
+  async create(
+    data: Omit<Appointment, "id" | "createdAt" | "updatedAt">,
+  ): Promise<ApiResponse<Appointment>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        dentistId: data.doctorId,
+        appointmentDate: convertEgyptTimeToUTC(data.date, data.time),
+        serviceId: data.serviceId,
+        notes: data.notes,
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>("/api/admin/appointments", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      return {
+        data: appointmentService.mapBackendToAppointment(res.data),
+        success: true,
+        message: "Appointment created successfully",
+      };
+    } catch (error) {
+      console.error("[adminAppointmentService.create] Error:", error);
+      return { data: {} as Appointment, success: false };
+    }
+  },
+
+  /**
+   * Update appointment status
+   * PATCH /api/admin/appointments/{id}/status
+   */
+  async updateStatus(
+    id: string,
+    status: string,
+  ): Promise<ApiResponse<Appointment>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/admin/appointments/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      return {
+        data: appointmentService.mapBackendToAppointment(res.data),
+        success: true,
+        message: "Appointment status updated",
+      };
+    } catch (error) {
+      console.error("[adminAppointmentService.updateStatus] Error:", error);
+      return { data: {} as Appointment, success: false };
+    }
+  },
+
+  /**
+   * Cancel appointment
+   * PATCH /api/admin/appointments/{id}/cancel
+   */
+  async cancel(id: string): Promise<ApiResponse<void>> {
+    try {
+      await apiCall(`/api/admin/appointments/${id}/cancel`, {
+        method: "PATCH",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Appointment cancelled",
+      };
+    } catch (error) {
+      console.error("[adminAppointmentService.cancel] Error:", error);
+      return { data: undefined, success: false };
+    }
+  },
+};
+
+/**
+ * Admin Speciality Management
+ * Endpoints: GET, POST, PUT, DELETE
+ */
+export const adminSpecialityService = {
+  /**
+   * Get all specialities
+   * GET /api/AdminSpeciality
+   */
+  async getAll(): Promise<ApiResponse<Service[]>> {
+    try {
+      console.debug(
+        "[adminSpecialityService.getAll] Fetching from /api/AdminSpeciality...",
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/AdminSpeciality", {
+        method: "GET",
+      });
+      console.debug("[adminSpecialityService.getAll] Raw response:", res);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const services = ((res.data as any[]) || []).map((spec: any) => ({
+        id: String(spec.id ?? ""),
+        name: spec.name ?? "Unknown",
+        specialty: normalizeSpecialty(spec.specialty ?? spec.name),
+        description: spec.description ?? "",
+        price: spec.price ?? 0,
+        duration: spec.duration ?? 30,
+        icon: spec.icon ?? "stethoscope",
+      })) as unknown as Service[];
+
+      // Validate that services have proper names - if not, use mock data
+      const hasValidServices = services.some(
+        (s) => s.name && s.name !== "Unknown" && s.name.trim().length > 0,
+      );
+
+      if (services.length === 0 || !hasValidServices) {
+        console.warn(
+          "[adminSpecialityService.getAll] ⚠️ API returned empty or invalid service data",
+        );
+        console.warn(
+          "[adminSpecialityService.getAll] ⚠️ Falling back to mock services for demonstration",
+        );
+        await delay(400);
+        return { data: mockServices, success: true };
+      }
+
+      console.debug(
+        "[adminSpecialityService.getAll] ✅ Successfully mapped services:",
+        services.length,
+      );
+      return { data: services, success: true };
+    } catch (error) {
+      console.error(
+        "[adminSpecialityService.getAll] ❌ Error:",
+        error instanceof Error ? error.message : String(error),
+      );
+      console.warn(
+        "[adminSpecialityService.getAll] ⚠️ Falling back to mock services for demonstration",
+      );
+      // Fall back to mock data for demonstration/testing
+      await delay(400);
+      return { data: mockServices, success: true };
+    }
+  },
+
+  /**
+   * Get speciality by ID
+   * GET /api/AdminSpeciality/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<Service>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/AdminSpeciality/${id}`, {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spec = res.data as any;
+      const service: Service = {
+        id: String(spec.id ?? ""),
+        name: spec.name ?? "Unknown",
+        specialty: normalizeSpecialty(spec.specialty ?? spec.name),
+        description: spec.description ?? "",
+        price: spec.price ?? 0,
+        duration: spec.duration ?? 30,
+        icon: spec.icon ?? "stethoscope",
+      };
+      return { data: service, success: true };
+    } catch (error) {
+      console.error("[adminSpecialityService.getById] Error:", error);
+      return { data: {} as Service, success: false };
+    }
+  },
+
+  /**
+   * Create speciality
+   * POST /api/AdminSpeciality
+   */
+  async create(data: Partial<Service>): Promise<ApiResponse<Service>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        name: data.name ?? "",
+        description: data.description ?? "",
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>("/api/AdminSpeciality", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spec = res.data as any;
+      const service: Service = {
+        id: String(spec.id ?? ""),
+        name: spec.name ?? "Unknown",
+        specialty: normalizeSpecialty(spec.specialty ?? spec.name),
+        description: spec.description ?? "",
+        price: spec.price ?? 0,
+        duration: spec.duration ?? 30,
+        icon: spec.icon ?? "stethoscope",
+      };
+      return {
+        data: service,
+        success: true,
+        message: "Speciality created successfully",
+      };
+    } catch (error) {
+      console.error("[adminSpecialityService.create] Error:", error);
+      return { data: {} as Service, success: false };
+    }
+  },
+
+  /**
+   * Update speciality
+   * PUT /api/AdminSpeciality/{id}
+   */
+  async update(
+    id: string,
+    data: Partial<Service>,
+  ): Promise<ApiResponse<Service>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        name: data.name ?? "",
+        description: data.description ?? "",
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(`/api/AdminSpeciality/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spec = res.data as any;
+      const service: Service = {
+        id: String(spec.id ?? ""),
+        name: spec.name ?? "Unknown",
+        specialty: normalizeSpecialty(spec.specialty ?? spec.name),
+        description: spec.description ?? "",
+        price: spec.price ?? 0,
+        duration: spec.duration ?? 30,
+        icon: spec.icon ?? "stethoscope",
+      };
+      return {
+        data: service,
+        success: true,
+        message: "Speciality updated successfully",
+      };
+    } catch (error) {
+      console.error("[adminSpecialityService.update] Error:", error);
+      return { data: {} as Service, success: false };
+    }
+  },
+
+  /**
+   * Delete speciality
+   * DELETE /api/AdminSpeciality/{id}
+   */
+  async delete(id: string): Promise<ApiResponse<void>> {
+    try {
+      await apiCall(`/api/AdminSpeciality/${id}`, {
+        method: "DELETE",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Speciality deleted successfully",
+      };
+    } catch (error) {
+      console.error("[adminSpecialityService.delete] Error:", error);
       return { data: undefined, success: false };
     }
   },

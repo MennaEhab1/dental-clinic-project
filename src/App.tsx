@@ -2,9 +2,15 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from "react-router-dom";
 import { ThemeProvider } from "@/contexts/ThemeContext";
-import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AIChatWidget } from "@/components/ai/AIChatWidget";
 
 // Pages
@@ -43,6 +49,39 @@ import AdminPharmacy from "./pages/admin/AdminPharmacy";
 
 const queryClient = new QueryClient();
 
+function ProtectedRoute({ children }: { children: JSX.Element }) {
+  const { user, isLoading } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) return null;
+  if (!user) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+
+  return children;
+}
+
+function RoleRoute({
+  role,
+  children,
+}: {
+  role: "patient" | "doctor" | "admin";
+  children: JSX.Element;
+}) {
+  const { user } = useAuth();
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const userRole = String(user.role || "").toLowerCase();
+  if (userRole !== role) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -65,52 +104,220 @@ const App = () => (
               />
 
               {/* Patient Routes */}
-              <Route path="/patient/dashboard" element={<PatientDashboard />} />
+              <Route
+                path="/patient/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientDashboard />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/patient/appointments"
-                element={<PatientAppointments />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientAppointments />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
               <Route
                 path="/patient/records"
-                element={<PatientMedicalRecords />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientMedicalRecords />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
               <Route
                 path="/patient/prescriptions"
-                element={<PatientPrescriptions />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientPrescriptions />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
-              <Route path="/patient/reviews" element={<PatientReviews />} />
-              <Route path="/patient/messages" element={<PatientMessages />} />
-              <Route path="/patient/profile" element={<PatientProfile />} />
-              <Route path="/patient/settings" element={<PatientProfile />} />
+              <Route
+                path="/patient/reviews"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientReviews />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/messages"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientMessages />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/profile"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientProfile />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/patient/settings"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientProfile />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/patient/ai-analysis"
-                element={<PatientImageAnalysis />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="patient">
+                      <PatientImageAnalysis />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
 
               {/* Doctor Routes */}
-              <Route path="/doctor/dashboard" element={<DoctorDashboard />} />
+              <Route
+                path="/doctor/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorDashboard />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/doctor/appointments"
-                element={<DoctorAppointments />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorAppointments />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
-              <Route path="/doctor/patients" element={<DoctorPatients />} />
+              <Route
+                path="/doctor/patients"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorPatients />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/doctor/records"
-                element={<DoctorMedicalRecords />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorMedicalRecords />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
-              <Route path="/doctor/messages" element={<DoctorMessages />} />
-              <Route path="/doctor/settings" element={<DoctorDashboard />} />
+              <Route
+                path="/doctor/messages"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorMessages />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/doctor/settings"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorDashboard />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Admin Routes */}
-              <Route path="/admin/dashboard" element={<AdminDashboard />} />
-              <Route path="/admin/doctors" element={<AdminDoctors />} />
-              <Route path="/admin/patients" element={<AdminPatients />} />
+              <Route
+                path="/admin/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminDashboard />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/doctors"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminDoctors />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/patients"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminPatients />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
               <Route
                 path="/admin/appointments"
-                element={<AdminAppointments />}
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminAppointments />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
               />
-              <Route path="/admin/pharmacy" element={<AdminPharmacy />} />
-              <Route path="/admin/settings" element={<AdminDashboard />} />
+              <Route
+                path="/admin/pharmacy"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminPharmacy />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/settings"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="admin">
+                      <AdminDashboard />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
 
               {/* Catch-all */}
               <Route path="*" element={<NotFound />} />

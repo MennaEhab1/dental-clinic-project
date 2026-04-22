@@ -32,6 +32,7 @@ interface DoctorFormData {
   firstName: string;
   lastName: string;
   email: string;
+  password?: string;
   phone?: string;
   specialty: string;
   experience?: number;
@@ -96,6 +97,7 @@ export default function AdminDoctors() {
         firstName: doctor.firstName,
         lastName: doctor.lastName,
         email: doctor.email,
+        password: "",
         phone: doctor.phone || "",
         specialty: doctor.specialty,
         experience: doctor.experience || 0,
@@ -108,6 +110,7 @@ export default function AdminDoctors() {
         firstName: "",
         lastName: "",
         email: "",
+        password: "",
         phone: "",
         specialty: "general",
         experience: 0,
@@ -133,29 +136,44 @@ export default function AdminDoctors() {
       return;
     }
 
+    if (!editingDoctor && !formData.password?.trim()) {
+      toast({
+        title: "Error",
+        description: "Password is required when creating a doctor",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       if (editingDoctor) {
         // Update existing doctor
-        await adminDoctorService.update(editingDoctor.id, formData);
-        setDoctors((prev) =>
-          prev.map((d) =>
-            d.id === editingDoctor.id ? { ...d, ...formData } : d,
-          ),
+        const response = await adminDoctorService.update(
+          editingDoctor.id,
+          formData,
         );
+        if (!response.success) {
+          throw new Error(response.message || "Failed to update doctor");
+        }
         toast({ title: "Success", description: "Doctor updated successfully" });
       } else {
         // Create new doctor
         const response = await adminDoctorService.create(formData);
-        setDoctors((prev) => [...prev, response.data]);
+        if (!response.success) {
+          throw new Error(response.message || "Failed to create doctor");
+        }
         toast({ title: "Success", description: "Doctor created successfully" });
       }
+      await fetchDoctors();
       handleCloseDialog();
     } catch (error) {
       console.error("Failed to save doctor:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to save doctor";
       toast({
         title: "Error",
-        description: "Failed to save doctor",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -245,6 +263,19 @@ export default function AdminDoctors() {
                     }
                   />
                 </div>
+                {!editingDoctor && (
+                  <div className="space-y-2">
+                    <Label>Password *</Label>
+                    <Input
+                      type="password"
+                      placeholder="Set initial password"
+                      value={formData.password || ""}
+                      onChange={(e) =>
+                        setFormData({ ...formData, password: e.target.value })
+                      }
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Phone</Label>
                   <Input

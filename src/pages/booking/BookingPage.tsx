@@ -162,7 +162,18 @@ export default function BookingPage() {
   const selectedDoctor = doctors.find((d) => d.id === booking.doctorId);
 
   const filteredDoctors = booking.serviceId
-    ? doctors.filter((d) => d.specialty === selectedService?.specialty)
+    ? doctors.filter((d) => {
+        const svc = selectedService;
+        if (!svc) return true;
+        // Primary: match by specializationId (reliable ID-based match)
+        const docSpecId = (d as unknown as { specializationId?: number | null })
+          .specializationId;
+        if (docSpecId !== undefined && docSpecId !== null) {
+          return String(docSpecId) === svc.id;
+        }
+        // Fallback: match by normalized specialty string
+        return d.specialty === svc.specialty;
+      })
     : doctors;
 
   // Debug: Log filtering
@@ -367,11 +378,17 @@ export default function BookingPage() {
                     >
                       <CardContent className="p-4">
                         <div className="flex gap-4">
-                          <img
-                            src={service.image}
-                            alt={service.name}
-                            className="w-20 h-20 rounded-lg object-cover"
-                          />
+                          {service.image ? (
+                            <img
+                              src={service.image}
+                              alt={service.name}
+                              className="w-20 h-20 rounded-lg object-cover"
+                            />
+                          ) : (
+                            <div className="w-20 h-20 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <Stethoscope className="w-8 h-8 text-primary" />
+                            </div>
+                          )}
                           <div className="flex-1">
                             <h3 className="font-semibold text-foreground">
                               {service.name}
@@ -444,11 +461,17 @@ export default function BookingPage() {
                         >
                           <CardContent className="p-4">
                             <div className="flex gap-4">
-                              <img
-                                src={doctor.avatar}
-                                alt={`Dr. ${doctor.firstName} ${doctor.lastName}`}
-                                className="w-16 h-16 rounded-xl object-cover"
-                              />
+                              {doctor.avatar ? (
+                                <img
+                                  src={doctor.avatar}
+                                  alt={`Dr. ${doctor.firstName} ${doctor.lastName}`}
+                                  className="w-16 h-16 rounded-xl object-cover"
+                                />
+                              ) : (
+                                <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                                  <User className="w-8 h-8 text-primary" />
+                                </div>
+                              )}
                               <div className="flex-1">
                                 <h3 className="font-semibold text-foreground">
                                   Dr. {doctor.firstName} {doctor.lastName}

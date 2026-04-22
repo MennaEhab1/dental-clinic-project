@@ -17,7 +17,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { doctorService, patientService } from "@/services/api";
+import { doctorService } from "@/services/api";
 import type {
   Appointment,
   DashboardStats,
@@ -39,10 +39,9 @@ export default function DoctorDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [appointmentsRes, statsRes, patientsRes] = await Promise.all([
+        const [appointmentsRes, statsRes] = await Promise.all([
           doctorService.getAppointments(),
           doctorService.getDashboard(),
-          patientService.getAll(),
         ]);
 
         setAppointments(appointmentsRes.data);
@@ -57,11 +56,7 @@ export default function DoctorDashboard() {
           )
           .slice(0, 5);
 
-        setRecentPatients(
-          byAppointment.length > 0
-            ? byAppointment
-            : patientsRes.data.slice(0, 5),
-        );
+        setRecentPatients(byAppointment);
 
         const notifications: Notification[] = appointmentsRes.data
           .slice(0, 4)

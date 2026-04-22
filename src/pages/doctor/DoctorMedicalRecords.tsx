@@ -38,7 +38,6 @@ import {
 } from "lucide-react";
 import {
   doctorService,
-  patientService,
   pharmacyService,
   prescriptionService,
 } from "@/services/api";
@@ -79,14 +78,21 @@ export default function DoctorMedicalRecords() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [appointmentsRes, patientsRes, medicinesRes] = await Promise.all([
+        const [appointmentsRes, medicinesRes] = await Promise.all([
           doctorService.getAppointments(),
-          patientService.getAll(),
           pharmacyService.getAll(),
         ]);
 
+        const derivedPatients = appointmentsRes.data
+          .map((item) => item.patient)
+          .filter((item): item is Patient => !!item)
+          .filter(
+            (item, index, array) =>
+              array.findIndex((entry) => entry.id === item.id) === index,
+          );
+
         const patientMap = new Map(
-          patientsRes.data.map((item) => [item.id, item]),
+          derivedPatients.map((item) => [item.id, item]),
         );
 
         const mappedRecords: MedicalRecord[] = appointmentsRes.data.map(
@@ -109,7 +115,7 @@ export default function DoctorMedicalRecords() {
         );
 
         setRecords(mappedRecords);
-        setPatients(patientsRes.data);
+        setPatients(derivedPatients);
         setMedicines(medicinesRes.data);
       } catch (error) {
         console.error("Failed to fetch medical records data:", error);

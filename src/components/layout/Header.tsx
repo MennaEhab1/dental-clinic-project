@@ -1,9 +1,11 @@
 import { motion } from "framer-motion";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
-import { Menu, X, Phone, Calendar } from "lucide-react";
+import { Menu, X, Phone, Calendar, LayoutDashboard, LogOut } from "lucide-react";
 import { useState } from "react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navLinks = [
   { href: "/", label: "Home" },
@@ -14,6 +16,26 @@ const navLinks = [
 export function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, isAuthenticated, logout } = useAuth();
+
+  const resolveDashboardRoute = () => {
+    const normalizedRole = String(user?.role || "").toLowerCase();
+    if (normalizedRole.includes("admin")) return "/admin/dashboard";
+    if (
+      normalizedRole.includes("doctor") ||
+      normalizedRole.includes("dentist")
+    ) {
+      return "/doctor/dashboard";
+    }
+    return "/patient/dashboard";
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/", { replace: true });
+    setIsOpen(false);
+  };
 
   return (
     <motion.header
@@ -62,11 +84,39 @@ export function Header() {
               <span>+1 555-123-4567</span>
             </a>
             <ThemeToggle />
-            <Link to="/login">
-              <Button variant="ghost" size="sm">
-                Sign In
-              </Button>
-            </Link>
+            {isAuthenticated ? (
+              <>
+                <Link to={resolveDashboardRoute()}>
+                  <Button variant="ghost" size="sm" className="gap-2">
+                    <LayoutDashboard className="w-4 h-4" />
+                    Dashboard
+                  </Button>
+                </Link>
+                <Link
+                  to={resolveDashboardRoute()}
+                  className="flex items-center"
+                  title="Open dashboard"
+                >
+                  <Avatar className="h-9 w-9">
+                    <AvatarImage src={user?.avatar} />
+                    <AvatarFallback>
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                </Link>
+                <Button variant="ghost" size="sm" onClick={handleLogout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </Button>
+              </>
+            ) : (
+              <Link to="/login">
+                <Button variant="ghost" size="sm">
+                  Sign In
+                </Button>
+              </Link>
+            )}
             <Link to="/booking">
               <Button size="sm" className="gradient-bg border-0">
                 <Calendar className="w-4 h-4 mr-2" />
@@ -116,11 +166,30 @@ export function Header() {
                 </Link>
               ))}
               <div className="border-t border-border my-2" />
-              <Link to="/login" onClick={() => setIsOpen(false)}>
-                <Button variant="ghost" className="w-full justify-start">
-                  Sign In
-                </Button>
-              </Link>
+              {isAuthenticated ? (
+                <>
+                  <Link to={resolveDashboardRoute()} onClick={() => setIsOpen(false)}>
+                    <Button variant="ghost" className="w-full justify-start">
+                      <LayoutDashboard className="w-4 h-4 mr-2" />
+                      Dashboard
+                    </Button>
+                  </Link>
+                  <Button
+                    variant="ghost"
+                    className="w-full justify-start"
+                    onClick={handleLogout}
+                  >
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </Button>
+                </>
+              ) : (
+                <Link to="/login" onClick={() => setIsOpen(false)}>
+                  <Button variant="ghost" className="w-full justify-start">
+                    Sign In
+                  </Button>
+                </Link>
+              )}
               <Link to="/booking" onClick={() => setIsOpen(false)}>
                 <Button className="w-full gradient-bg border-0">
                   <Calendar className="w-4 h-4 mr-2" />

@@ -13,6 +13,7 @@ interface BackendUser {
   firstName?: string;
   lastName?: string;
   phone?: string;
+  avatar?: string;
   userName: string;
   email: string;
   role: string;

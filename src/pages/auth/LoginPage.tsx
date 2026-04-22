@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ export default function LoginPage() {
     {},
   );
 
-  const { login } = useAuth();
+  const { login, user, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -33,6 +33,12 @@ export default function LoginPage() {
     }
     return "/patient/dashboard";
   };
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate(resolveDashboardRoute(user?.role), { replace: true });
+    }
+  }, [authLoading, isAuthenticated, navigate, user?.role]);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -229,3 +235,9 @@ export default function LoginPage() {
     </div>
   );
 }
+
+/*admin@site.test ---  P@ssw0rd!1 */
+/*{
+  "email": "smartteethtest@gmail.com",
+  "password": "Doctor123!"
+} */

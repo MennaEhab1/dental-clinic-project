@@ -34,7 +34,6 @@ import {
   Droplet,
   AlertTriangle,
 } from "lucide-react";
-import { patientService } from "@/services/api";
 import type { Patient } from "@/types";
 import { doctorService } from "@/services/api";
 
@@ -61,12 +60,17 @@ export default function DoctorPatients() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [patientsRes, appointmentsRes] = await Promise.all([
-          patientService.getAll(),
-          doctorService.getAppointments(),
-        ]);
+        const appointmentsRes = await doctorService.getAppointments();
 
-        setPatients(patientsRes.data);
+        const uniquePatients = appointmentsRes.data
+          .map((item) => item.patient)
+          .filter((item): item is Patient => !!item)
+          .filter(
+            (item, index, array) =>
+              array.findIndex((entry) => entry.id === item.id) === index,
+          );
+
+        setPatients(uniquePatients);
 
         const mapped = appointmentsRes.data.reduce<
           Record<

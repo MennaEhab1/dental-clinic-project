@@ -20,7 +20,7 @@ import { Link } from "react-router-dom";
 import {
   adminAppointmentService,
   adminDoctorService,
-  patientService,
+  adminPatientService,
 } from "@/services/api";
 import type { Appointment, DashboardStats, Doctor } from "@/types";
 
@@ -36,7 +36,7 @@ export default function AdminDashboard() {
         const [appointmentsRes, doctorsRes, patientsRes] = await Promise.all([
           adminAppointmentService.getAll(),
           adminDoctorService.getAll(),
-          patientService.getAll(),
+          adminPatientService.getAll(),
         ]);
 
         const appointmentList = appointmentsRes.data || [];

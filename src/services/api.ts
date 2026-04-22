@@ -115,6 +115,60 @@ function normalizeAppointmentStatus(
   return "pending";
 }
 
+function toSafeNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function splitName(fullName?: string | null): {
+  firstName: string;
+  lastName: string;
+} {
+  const safeName = (fullName || "").trim();
+  if (!safeName) {
+    return { firstName: "Unknown", lastName: "Patient" };
+  }
+
+  const parts = safeName.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { firstName: parts[0], lastName: "" };
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.slice(1).join(" "),
+  };
+}
+
+function mapBackendDashboardStats(raw: unknown): DashboardStats {
+  const fallback = mockDashboardStats;
+  if (!raw || typeof raw !== "object") {
+    return fallback;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const item = raw as any;
+
+  return {
+    totalPatients: toSafeNumber(item.totalPatients ?? item.patientsCount),
+    totalDoctors: toSafeNumber(item.totalDoctors ?? item.doctorsCount),
+    todayAppointments: toSafeNumber(
+      item.todayAppointments ?? item.todayAppointmentCount,
+    ),
+    completedAppointments: toSafeNumber(
+      item.completedAppointments ?? item.completedCount,
+    ),
+    revenue: toSafeNumber(item.revenue ?? item.totalRevenue),
+    pendingAppointments: toSafeNumber(
+      item.pendingAppointments ?? item.pendingCount,
+    ),
+  };
+}
+
 /**
  * Decode JWT token to extract claims (for debugging)
  * @param token - JWT token
@@ -923,7 +977,10 @@ export const doctorService = {
           workingDays: doc.workingDays ?? [],
           firstName: doc.firstName ?? doc.name?.split(" ")[0] ?? "",
           lastName: doc.lastName ?? doc.name?.split(" ")[1] ?? "",
+          avatar: doc.photo ?? doc.profileImage ?? undefined,
           profileImage: doc.profileImage ?? doc.photo ?? undefined,
+          // Store raw specializationId for reliable doctor filtering by service
+          specializationId: doc.specializationId ?? null,
           createdAt: doc.createdAt ?? new Date(),
           updatedAt: doc.updatedAt ?? new Date(),
         })) as unknown as Doctor[];
@@ -936,12 +993,11 @@ export const doctorService = {
       );
     }
 
-    // Fall back to mock data if backend unavailable
+    // Backend unavailable — return empty list (no mock fallback)
     console.warn(
-      "[doctorService.getAll] ⚠️ Backend unavailable, using mock doctors for demo purposes",
+      "[doctorService.getAll] ⚠️ Backend unavailable, returning empty doctor list",
     );
-    await delay(600);
-    return { data: mockDoctors, success: true };
+    return { data: [], success: false };
   },
 
   async getById(id: string): Promise<ApiResponse<Doctor>> {
@@ -1034,9 +1090,9 @@ export const doctorService = {
   async getDashboard(): Promise<ApiResponse<DashboardStats>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await apiCall<any>("/api/doctor/dashboard", { method: "GET" });
-    // Use mock data if backend doesn't return the expected structure
+    // Normalize backend shape and keep a safe fallback for missing fields.
     return {
-      data: res.data || mockDashboardStats,
+      data: mapBackendDashboardStats(res.data),
       success: true,
     };
   },
@@ -1118,6 +1174,185 @@ export const patientService = {
       },
     );
     return { data: res.data || [], success: true };
+  },
+};
+
+// Admin Patient Services
+export const adminPatientService = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mapBackendToPatient(item: any): Patient {
+    const { firstName, lastName } = splitName(item.fullName ?? item.name);
+    return {
+      id: String(item.id ?? item.patientId ?? ""),
+      email: item.email ?? "",
+      firstName: item.firstName ?? firstName,
+      lastName: item.lastName ?? lastName,
+      phone: item.phone ?? item.phoneNumber ?? "",
+      avatar: item.avatar,
+      role: "patient",
+      dateOfBirth: item.dateOfBirth ?? item.birthDate ?? "",
+      gender:
+        item.gender === "male" ||
+        item.gender === "female" ||
+        item.gender === "other"
+          ? item.gender
+          : "other",
+      address: item.address ?? "",
+      isActive:
+        typeof item.isActive === "boolean"
+          ? item.isActive
+          : item.status
+            ? String(item.status).toLowerCase() !== "inactive"
+            : true,
+      createdAt: item.createdAt ?? new Date().toISOString(),
+      updatedAt: item.updatedAt ?? item.modifiedAt ?? new Date().toISOString(),
+    };
+  },
+
+  /**
+   * Get all patients (admin view)
+   * GET /api/admin/patients
+   */
+  async getAll(): Promise<PaginatedResponse<Patient>> {
+    const candidateEndpoints = [
+      "/api/admin/patients",
+      "/api/admin/patient",
+      "/api/admin/Patients",
+      "/api/admin/GetPatients",
+      "/api/admin/patients/all",
+    ];
+
+    let lastError: unknown = null;
+
+    for (const endpoint of candidateEndpoints) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await apiCall<any>(endpoint, { method: "GET" });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const payload = res.data as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rawData: any[] = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+        const patients = rawData.map((item) =>
+          adminPatientService.mapBackendToPatient(item),
+        );
+
+        return {
+          data: patients,
+          total: Number(payload?.total ?? patients.length),
+          page: Number(payload?.page ?? 1),
+          limit: Number((payload?.limit ?? patients.length) || 10),
+          totalPages: Number(payload?.totalPages ?? 1),
+        };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    // Fallback: derive patient list from admin appointments endpoint.
+    // This keeps admin patient screens functional even if backend exposes
+    // patient data only through appointment resources.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/admin/appointments", {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const appointments = (res.data || []) as any[];
+
+      const patientsMap = new Map<string, Patient>();
+
+      for (const appointment of appointments) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nestedPatient = (appointment?.patient ||
+          appointment?.patientDTO) as any;
+
+        if (nestedPatient) {
+          const mapped = adminPatientService.mapBackendToPatient(nestedPatient);
+          if (mapped.id) {
+            patientsMap.set(mapped.id, mapped);
+          }
+          continue;
+        }
+
+        const patientName = String(appointment?.patientName || "").trim();
+        const patientId = String(appointment?.patientId || "").trim();
+        if (!patientName) continue;
+
+        const mapped = adminPatientService.mapBackendToPatient({
+          id:
+            patientId ||
+            `patient-${patientName.toLowerCase().replace(/\s+/g, "-")}`,
+          fullName: patientName,
+          email: appointment?.patientEmail || "",
+          phoneNumber: appointment?.patientPhone || "",
+          isActive: true,
+        });
+
+        if (mapped.id) {
+          patientsMap.set(mapped.id, mapped);
+        }
+      }
+
+      const patients = Array.from(patientsMap.values());
+      return {
+        data: patients,
+        total: patients.length,
+        page: 1,
+        limit: patients.length || 10,
+        totalPages: 1,
+      };
+    } catch (fallbackError) {
+      lastError = fallbackError;
+    }
+
+    console.error("[adminPatientService.getAll] Failed to fetch patients", {
+      candidateEndpoints,
+      lastError,
+    });
+
+    throw new Error("Failed to fetch patients from backend");
+  },
+
+  /**
+   * Toggle patient status
+   * PATCH /api/admin/patients/{id}/toggle-status
+   */
+  async toggleStatus(id: string): Promise<ApiResponse<void>> {
+    const candidateEndpoints = [
+      `/api/admin/patients/${id}/toggle-status`,
+      `/api/admin/patients/${id}/status`,
+      `/api/admin/patient/${id}/toggle-status`,
+      `/api/admin/patients/${id}/toggle`,
+    ];
+
+    let lastError: unknown = null;
+
+    for (const endpoint of candidateEndpoints) {
+      try {
+        await apiCall<void>(endpoint, { method: "PATCH" });
+        return {
+          data: undefined,
+          success: true,
+          message: "Patient status updated",
+        };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    console.error(
+      "[adminPatientService.toggleStatus] Failed to toggle patient status",
+      {
+        candidateEndpoints,
+        lastError,
+      },
+    );
+    throw new Error("Failed to update patient status");
   },
 };
 
@@ -1322,7 +1557,12 @@ export const appointmentService = {
     });
 
     const appointmentDate =
-      item.appointmentDate || item.date || item.dateTime || null;
+      item.appointmentDate ||
+      item.date ||
+      item.dateTime ||
+      item.createdAt ||
+      item.dateCreated ||
+      null;
     let date = "";
     let time = "";
     if (appointmentDate) {
@@ -1387,6 +1627,15 @@ export const appointmentService = {
         }
       : undefined;
 
+    // Build patient from flat patientName payloads used by doctor endpoints.
+    const patientName = String(item.patientName || "").trim();
+    const patientNameParts = patientName.split(/\s+/).filter(Boolean);
+    const patientFirstName = patientNameParts[0] || "Patient";
+    const patientLastName = patientNameParts.slice(1).join(" ") || "";
+    const patientIdFromName = patientName
+      ? `patient-${patientName.toLowerCase().replace(/\s+/g, "-")}`
+      : "";
+
     // Map patient object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const patientObj = item.patient ? (item.patient as any) : undefined;
@@ -1407,12 +1656,31 @@ export const appointmentService = {
           createdAt: patientObj.createdAt || new Date().toISOString(),
           updatedAt: patientObj.updatedAt || new Date().toISOString(),
         }
-      : undefined;
+      : patientName
+        ? {
+            id: String(item.patientId || patientIdFromName),
+            email: patientName.includes("@") ? patientName : "",
+            firstName: patientFirstName,
+            lastName: patientLastName,
+            phone: "",
+            avatar: "",
+            role: "patient" as const,
+            dateOfBirth: "",
+            gender: "other" as const,
+            address: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }
+        : undefined;
 
     return {
       id: String(item.appointmentId || item.id || fallback?.id || ""),
       patientId: String(
-        item.patientId || item.patient?.id || fallback?.patientId || "",
+        item.patientId ||
+          item.patient?.id ||
+          mappedPatient?.id ||
+          fallback?.patientId ||
+          "",
       ),
       patient: mappedPatient,
       doctorId: doctorId,
@@ -1476,12 +1744,11 @@ export const serviceService = {
       );
     }
 
-    // Fall back to mock data if backend unavailable
+    // Backend unavailable — return empty list (no mock fallback)
     console.warn(
-      "[serviceService.getAll] ⚠️ Backend unavailable, using mock services",
+      "[serviceService.getAll] ⚠️ Backend unavailable, returning empty service list",
     );
-    await delay(500);
-    return { data: mockServices, success: true };
+    return { data: [], success: false };
   },
 
   async getById(id: string): Promise<ApiResponse<Service>> {
@@ -1757,6 +2024,73 @@ export const reviewService = {
  * Endpoints: GET, POST, PUT, DELETE, PATCH
  */
 export const adminDoctorService = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mapBackendToDoctor(doc: any): Doctor {
+    const { firstName, lastName } = splitName(
+      doc.fullName ??
+        doc.name ??
+        `${doc.firstName ?? ""} ${doc.lastName ?? ""}`,
+    );
+
+    return {
+      id: String(doc.id ?? ""),
+      email: doc.email ?? "",
+      phone: doc.phone ?? doc.phoneNumber ?? "",
+      firstName: doc.firstName ?? firstName,
+      lastName: doc.lastName ?? lastName,
+      avatar: doc.avatar,
+      role: "doctor" as const,
+      specialty: normalizeSpecialty(
+        doc.specialty ?? doc.specializationName ?? doc.specialityName,
+      ),
+      qualifications: doc.qualifications ?? [],
+      experience: doc.experience ?? doc.workingHours ?? 0,
+      bio: doc.bio ?? "",
+      consultationFee: doc.consultationFee ?? doc.salary ?? 0,
+      rating: doc.rating ?? 0,
+      reviewCount: doc.reviewCount ?? 0,
+      availableSlots: doc.availableSlots ?? [],
+      workingDays: doc.workingDays ?? [],
+      createdAt: doc.createdAt ?? new Date().toISOString(),
+      updatedAt: doc.updatedAt ?? new Date().toISOString(),
+    };
+  },
+
+  async resolveSpecialityId(
+    specialty?: string,
+  ): Promise<number | null | undefined> {
+    if (!specialty) return undefined;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/Lookup/Specializations", {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const items = (res.data || []) as any[];
+      const normalizedTarget = String(specialty)
+        .toLowerCase()
+        .replace(/-/g, "");
+
+      const matched = items.find((item) => {
+        const name = String(item?.name || "")
+          .toLowerCase()
+          .replace(/\s+/g, "")
+          .replace(/-/g, "");
+
+        return (
+          name === normalizedTarget ||
+          name.includes(normalizedTarget) ||
+          normalizedTarget.includes(name)
+        );
+      });
+
+      return matched?.id ?? null;
+    } catch {
+      return undefined;
+    }
+  },
+
   /**
    * Get all doctors (admin view)
    * GET /api/admin/doctors
@@ -1776,50 +2110,9 @@ export const adminDoctorService = {
         throw new Error("Invalid response format - expected array");
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doctors = (res.data as any[]).map((doc) => {
-        console.debug("[adminDoctorService.getAll] Mapping doctor:", doc);
-        return {
-          id: String(doc.id ?? ""),
-          email: doc.email ?? "",
-          phone: doc.phone ?? "",
-          firstName: doc.firstName ?? "",
-          lastName: doc.lastName ?? "",
-          avatar: doc.avatar,
-          role: "doctor" as const,
-          specialty: normalizeSpecialty(
-            doc.specialty ?? doc.specializationName,
-          ),
-          qualifications: doc.qualifications ?? [],
-          experience: doc.experience ?? 0,
-          bio: doc.bio ?? "",
-          consultationFee: doc.consultationFee ?? 0,
-          rating: doc.rating ?? 0,
-          reviewCount: doc.reviewCount ?? 0,
-          availableSlots: doc.availableSlots ?? [],
-          workingDays: doc.workingDays ?? [],
-          createdAt: doc.createdAt ?? new Date().toISOString(),
-          updatedAt: doc.updatedAt ?? new Date().toISOString(),
-        };
-      }) as unknown as Doctor[];
-
-      // Validate that doctors have proper names - if not, use mock data
-      const hasValidNames = doctors.some(
-        (d) =>
-          (d.firstName && d.firstName.trim().length > 0) ||
-          (d.lastName && d.lastName.trim().length > 0),
+      const doctors = (res.data as unknown[]).map((doc) =>
+        adminDoctorService.mapBackendToDoctor(doc),
       );
-
-      if (doctors.length === 0 || !hasValidNames) {
-        console.warn(
-          "[adminDoctorService.getAll] ⚠️ API returned empty or invalid doctor data (empty names or no doctors)",
-        );
-        console.warn(
-          "[adminDoctorService.getAll] ⚠️ Falling back to mock doctors for demonstration",
-        );
-        await delay(400);
-        return { data: mockDoctors, success: true };
-      }
 
       console.debug(
         "[adminDoctorService.getAll] ✅ Successfully mapped doctors:",
@@ -1831,12 +2124,7 @@ export const adminDoctorService = {
         "[adminDoctorService.getAll] ❌ Error:",
         error instanceof Error ? error.message : String(error),
       );
-      console.warn(
-        "[adminDoctorService.getAll] ⚠️ Falling back to mock doctors for demonstration",
-      );
-      // Fall back to mock data for demonstration/testing
-      await delay(400);
-      return { data: mockDoctors, success: true };
+      return { data: [], success: false };
     }
   },
 
@@ -1852,26 +2140,7 @@ export const adminDoctorService = {
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = res.data as any;
-      const doctor: Doctor = {
-        id: String(doc.id ?? ""),
-        email: doc.email ?? "",
-        phone: doc.phone ?? "",
-        firstName: doc.firstName ?? "",
-        lastName: doc.lastName ?? "",
-        avatar: doc.avatar,
-        role: "doctor",
-        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
-        qualifications: doc.qualifications ?? [],
-        experience: doc.experience ?? 0,
-        bio: doc.bio ?? "",
-        consultationFee: doc.consultationFee ?? 0,
-        rating: doc.rating ?? 0,
-        reviewCount: doc.reviewCount ?? 0,
-        availableSlots: doc.availableSlots ?? [],
-        workingDays: doc.workingDays ?? [],
-        createdAt: doc.createdAt ?? new Date().toISOString(),
-        updatedAt: doc.updatedAt ?? new Date().toISOString(),
-      };
+      const doctor = adminDoctorService.mapBackendToDoctor(doc);
       return { data: doctor, success: true };
     } catch (error) {
       console.error("[adminDoctorService.getById] Error:", error);
@@ -1885,17 +2154,29 @@ export const adminDoctorService = {
    */
   async create(data: Partial<Doctor>): Promise<ApiResponse<Doctor>> {
     try {
+      const specialityID = await adminDoctorService.resolveSpecialityId(
+        data.specialty,
+      );
+      const password =
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((data as any).password as string | undefined) ?? undefined;
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: any = {
-        firstName: data.firstName ?? "",
-        lastName: data.lastName ?? "",
+        fullName: `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim(),
         email: data.email ?? "",
-        phoneNumber: data.phone ?? "",
-        specializationName: data.specialty ?? "General",
-        yearsOfExperience: data.experience ?? 0,
-        bio: data.bio ?? "",
-        consultationFee: data.consultationFee ?? 0,
+        salary: Number(data.consultationFee ?? 0),
+        workingHours: Number(data.experience ?? 0),
+        hiringDate: new Date().toISOString(),
       };
+
+      if (typeof specialityID === "number" && Number.isFinite(specialityID)) {
+        payload.specialityID = specialityID;
+      }
+
+      if (password && password.trim().length > 0) {
+        payload.password = password;
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiCall<any>("/api/admin/doctors", {
@@ -1905,26 +2186,12 @@ export const adminDoctorService = {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = res.data as any;
-      const doctor: Doctor = {
-        id: String(doc.id ?? ""),
-        email: doc.email ?? "",
-        phone: doc.phone ?? "",
-        firstName: doc.firstName ?? "",
-        lastName: doc.lastName ?? "",
-        avatar: doc.avatar,
-        role: "doctor",
-        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
-        qualifications: doc.qualifications ?? [],
-        experience: doc.experience ?? 0,
-        bio: doc.bio ?? "",
-        consultationFee: doc.consultationFee ?? 0,
-        rating: doc.rating ?? 0,
-        reviewCount: doc.reviewCount ?? 0,
-        availableSlots: doc.availableSlots ?? [],
-        workingDays: doc.workingDays ?? [],
-        createdAt: doc.createdAt ?? new Date().toISOString(),
-        updatedAt: doc.updatedAt ?? new Date().toISOString(),
-      };
+      const doctor = adminDoctorService.mapBackendToDoctor({
+        ...doc,
+        firstName: doc?.firstName ?? data.firstName,
+        lastName: doc?.lastName ?? data.lastName,
+        specialty: doc?.specialty ?? data.specialty,
+      });
       return {
         data: doctor,
         success: true,
@@ -1932,7 +2199,12 @@ export const adminDoctorService = {
       };
     } catch (error) {
       console.error("[adminDoctorService.create] Error:", error);
-      return { data: {} as Doctor, success: false };
+      return {
+        data: {} as Doctor,
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to create doctor",
+      };
     }
   },
 
@@ -1945,17 +2217,19 @@ export const adminDoctorService = {
     data: Partial<Doctor>,
   ): Promise<ApiResponse<Doctor>> {
     try {
+      const specialityID = await adminDoctorService.resolveSpecialityId(
+        data.specialty,
+      );
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: any = {
-        firstName: data.firstName ?? "",
-        lastName: data.lastName ?? "",
-        email: data.email ?? "",
-        phoneNumber: data.phone ?? "",
-        specializationName: data.specialty ?? "General",
-        yearsOfExperience: data.experience ?? 0,
-        bio: data.bio ?? "",
-        consultationFee: data.consultationFee ?? 0,
+        salary: Number(data.consultationFee ?? 0),
+        workingHours: Number(data.experience ?? 0),
       };
+
+      if (typeof specialityID === "number" && Number.isFinite(specialityID)) {
+        payload.specialityID = specialityID;
+      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiCall<any>(`/api/admin/doctors/${id}`, {
@@ -1965,26 +2239,12 @@ export const adminDoctorService = {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = res.data as any;
-      const doctor: Doctor = {
-        id: String(doc.id ?? ""),
-        email: doc.email ?? "",
-        phone: doc.phone ?? "",
-        firstName: doc.firstName ?? "",
-        lastName: doc.lastName ?? "",
-        avatar: doc.avatar,
-        role: "doctor",
-        specialty: normalizeSpecialty(doc.specialty ?? doc.specializationName),
-        qualifications: doc.qualifications ?? [],
-        experience: doc.experience ?? 0,
-        bio: doc.bio ?? "",
-        consultationFee: doc.consultationFee ?? 0,
-        rating: doc.rating ?? 0,
-        reviewCount: doc.reviewCount ?? 0,
-        availableSlots: doc.availableSlots ?? [],
-        workingDays: doc.workingDays ?? [],
-        createdAt: doc.createdAt ?? new Date().toISOString(),
-        updatedAt: doc.updatedAt ?? new Date().toISOString(),
-      };
+      const doctor = adminDoctorService.mapBackendToDoctor({
+        ...doc,
+        firstName: doc?.firstName ?? data.firstName,
+        lastName: doc?.lastName ?? data.lastName,
+        specialty: doc?.specialty ?? data.specialty,
+      });
       return {
         data: doctor,
         success: true,
@@ -1992,7 +2252,12 @@ export const adminDoctorService = {
       };
     } catch (error) {
       console.error("[adminDoctorService.update] Error:", error);
-      return { data: {} as Doctor, success: false };
+      return {
+        data: {} as Doctor,
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to update doctor",
+      };
     }
   },
 

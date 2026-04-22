@@ -32,7 +32,7 @@ import {
   MapPin,
   Calendar,
 } from "lucide-react";
-import { patientService } from "@/services/api";
+import { adminPatientService } from "@/services/api";
 import type { Patient } from "@/types";
 import { toast } from "@/hooks/use-toast";
 
@@ -52,7 +52,7 @@ export default function AdminPatients() {
   const fetchPatients = async () => {
     try {
       setIsLoading(true);
-      const response = await patientService.getAll();
+      const response = await adminPatientService.getAll();
       setPatients(response.data);
     } catch (error) {
       console.error("Failed to fetch patients:", error);
@@ -83,7 +83,7 @@ export default function AdminPatients() {
       if (!patient) return;
 
       const newStatus = !(patient.isActive !== false);
-      await patientService.update(id, { isActive: newStatus });
+      await adminPatientService.toggleStatus(id);
 
       setPatients((prev) =>
         prev.map((p) => (p.id === id ? { ...p, isActive: newStatus } : p)),

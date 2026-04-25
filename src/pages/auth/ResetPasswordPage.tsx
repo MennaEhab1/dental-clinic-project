@@ -93,6 +93,11 @@ export default function ResetPasswordPage() {
 
     setIsSubmitting(true);
     try {
+      console.debug("[ResetPasswordPage] Submitting reset with:", {
+        email,
+        token,
+        newPasswordLength: newPassword.length,
+      });
       await authService.resetPassword({
         email,
         token,

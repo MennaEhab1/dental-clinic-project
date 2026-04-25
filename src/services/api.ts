@@ -634,13 +634,15 @@ export const authService = {
   },
 
   async resetPassword(data: ResetPasswordDTO): Promise<ApiResponse<void>> {
+    const payload = {
+      email: data.email,
+      token: data.token,
+      newPassword: data.newPassword,
+    };
+    console.debug("[authService] resetPassword payload:", payload);
     await apiCall<void>("/api/Account/reset-password", {
       method: "POST",
-      body: JSON.stringify({
-        email: data.email,
-        token: data.token,
-        newPassword: data.newPassword,
-      }),
+      body: JSON.stringify(payload),
     });
 
     return {

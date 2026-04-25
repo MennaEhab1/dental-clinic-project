@@ -41,10 +41,11 @@ export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const email = useMemo(
-    () => getQueryValue(searchParams, "email", "Email"),
-    [searchParams],
-  );
+  const email = useMemo(() => {
+    // URLSearchParams decodes '+' as space, so we restore it for emails like user+tag@example.com
+    const raw = getQueryValue(searchParams, "email", "Email");
+    return raw.replace(/ /g, "+");
+  }, [searchParams]);
   const token = useMemo(() => {
     const rawToken = getQueryValue(searchParams, "token", "Token");
     return rawToken.replace(/ /g, "+");
@@ -152,7 +153,9 @@ export default function ResetPasswordPage() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Enter your new password"
-                    className={errors.newPassword ? "border-destructive pr-10" : "pr-10"}
+                    className={
+                      errors.newPassword ? "border-destructive pr-10" : "pr-10"
+                    }
                   />
                   <button
                     type="button"
@@ -167,7 +170,9 @@ export default function ResetPasswordPage() {
                   </button>
                 </div>
                 {errors.newPassword && (
-                  <p className="text-xs text-destructive mt-1">{errors.newPassword}</p>
+                  <p className="text-xs text-destructive mt-1">
+                    {errors.newPassword}
+                  </p>
                 )}
               </div>
 
@@ -180,13 +185,15 @@ export default function ResetPasswordPage() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Repeat the new password"
-                    className={errors.confirmPassword ? "border-destructive pr-10" : "pr-10"}
+                    className={
+                      errors.confirmPassword
+                        ? "border-destructive pr-10"
+                        : "pr-10"
+                    }
                   />
                   <button
                     type="button"
-                    onClick={() =>
-                      setShowConfirmPassword((value) => !value)
-                    }
+                    onClick={() => setShowConfirmPassword((value) => !value)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   >
                     {showConfirmPassword ? (
@@ -221,7 +228,10 @@ export default function ResetPasswordPage() {
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
               Remembered it?{" "}
-              <Link to="/login" className="text-primary font-medium hover:underline">
+              <Link
+                to="/login"
+                className="text-primary font-medium hover:underline"
+              >
                 Back to login
               </Link>
             </p>

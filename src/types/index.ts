@@ -107,6 +107,7 @@ export interface WeeklySchedule {
 
 export interface MedicalRecord {
   id: string;
+  appointmentId?: string;
   patientId: string;
   doctorId: string;
   doctor?: Doctor;

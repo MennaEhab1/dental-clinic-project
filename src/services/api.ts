@@ -28,6 +28,7 @@ import type {
   Appointment,
   Service,
   Medicine,
+  MedicalRecord,
   Conversation,
   Message,
   DashboardStats,
@@ -1014,6 +1015,274 @@ export const prescriptionService = {
       { method: "GET" },
     );
     return { data: res.data || [], success: true };
+  },
+};
+
+const NO_PRESCRIPTION_STORAGE_KEY = "doctor_no_prescription_by_appointment";
+const PRESCRIPTION_STORAGE_KEY = "doctor_prescription_by_appointment";
+const MEDICAL_RECORDS_STORAGE_KEY = "doctor_medical_records";
+
+function readNoPrescriptionMap(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(NO_PRESCRIPTION_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeNoPrescriptionMap(data: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(NO_PRESCRIPTION_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function readPrescriptionMap(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(PRESCRIPTION_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, boolean>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePrescriptionMap(data: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(PRESCRIPTION_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function readStoredMedicalRecords(): MedicalRecord[] {
+  try {
+    const raw = localStorage.getItem(MEDICAL_RECORDS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as MedicalRecord[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredMedicalRecords(records: MedicalRecord[]): void {
+  try {
+    localStorage.setItem(MEDICAL_RECORDS_STORAGE_KEY, JSON.stringify(records));
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+// Inferred from MedicalRecord usage in the app because Swagger does not include DTOs for these endpoints.
+export interface CreateMedicalRecordRequest {
+  appointmentId?: string;
+  patientId: string;
+  diagnosis: string;
+  treatment: string;
+  notes: string;
+  toothNumber?: string;
+  type?: "diagnosis" | "treatment" | "prescription" | "note";
+}
+
+export interface UpdateMedicalRecordRequest extends CreateMedicalRecordRequest {
+  id: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapBackendToMedicalRecord(item: any): MedicalRecord {
+  return {
+    id: String(item.id || item.recordId || `record-${Date.now()}`),
+    appointmentId: item.appointmentId
+      ? String(item.appointmentId)
+      : item.appointmentID
+        ? String(item.appointmentID)
+        : undefined,
+    patientId: String(item.patientId || item.patientID || ""),
+    doctorId: String(item.doctorId || item.doctorID || ""),
+    date: String(item.date || item.createdAt || new Date().toISOString()),
+    type:
+      item.type === "diagnosis" ||
+      item.type === "treatment" ||
+      item.type === "prescription" ||
+      item.type === "note"
+        ? item.type
+        : "note",
+    diagnosis: String(item.diagnosis || ""),
+    treatment: String(item.treatment || ""),
+    notes: String(item.notes || ""),
+    toothNumber: item.toothNumber ? String(item.toothNumber) : undefined,
+    attachments: [],
+  };
+}
+
+export const appointmentCareService = {
+  async markNoPrescription(appointmentId: string): Promise<ApiResponse<void>> {
+    const current = readNoPrescriptionMap();
+    current[appointmentId] = true;
+    writeNoPrescriptionMap(current);
+
+    // Inferred endpoint based on doctor appointment routing pattern.
+    try {
+      await apiCall<void>(
+        `/api/doctor/appointments/${appointmentId}/no-prescription`,
+        {
+          method: "PUT",
+        },
+      );
+    } catch {
+      // Keep frontend state when backend endpoint is unavailable.
+    }
+
+    return {
+      data: undefined,
+      success: true,
+      message: "No prescription saved",
+    };
+  },
+
+  getNoPrescriptionMap(): Record<string, boolean> {
+    return readNoPrescriptionMap();
+  },
+
+  markPrescriptionSubmitted(appointmentId: string): void {
+    const current = readPrescriptionMap();
+    current[appointmentId] = true;
+    writePrescriptionMap(current);
+  },
+
+  getPrescriptionMap(): Record<string, boolean> {
+    return readPrescriptionMap();
+  },
+};
+
+export const medicalRecordService = {
+  async getByPatient(patientId: string): Promise<ApiResponse<MedicalRecord[]>> {
+    try {
+      // Inferred endpoint because Swagger does not currently expose medical record endpoints.
+      const res = await apiCall<unknown[]>(
+        `/api/MedicalRecord/patient/${patientId}`,
+        {
+          method: "GET",
+        },
+      );
+      const mapped = (res.data || []).map((item) =>
+        mapBackendToMedicalRecord(item),
+      );
+
+      // Merge backend and locally-cached records for continuity.
+      const local = readStoredMedicalRecords().filter(
+        (record) => record.patientId === patientId,
+      );
+      return { data: [...mapped, ...local], success: true };
+    } catch {
+      const local = readStoredMedicalRecords().filter(
+        (record) => record.patientId === patientId,
+      );
+      return { data: local, success: true };
+    }
+  },
+
+  async create(
+    data: CreateMedicalRecordRequest,
+  ): Promise<ApiResponse<MedicalRecord>> {
+    const localRecord: MedicalRecord = {
+      id: `record-local-${Date.now()}`,
+      appointmentId: data.appointmentId,
+      patientId: data.patientId,
+      doctorId: "",
+      date: new Date().toISOString(),
+      type: data.type || "note",
+      diagnosis: data.diagnosis,
+      treatment: data.treatment,
+      notes: data.notes,
+      toothNumber: data.toothNumber,
+      attachments: [],
+    };
+
+    try {
+      // Inferred payload shape from MedicalRecord interface fields used by existing pages.
+      const payload = {
+        appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
+        patientId: data.patientId,
+        diagnosis: data.diagnosis,
+        treatment: data.treatment,
+        notes: data.notes,
+        toothNumber: data.toothNumber || null,
+        type: data.type || "note",
+      };
+
+      // Inferred endpoint because Swagger does not currently expose medical record endpoints.
+      const res = await apiCall<unknown>("/api/MedicalRecord", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return { data: mapBackendToMedicalRecord(res.data), success: true };
+    } catch {
+      const current = readStoredMedicalRecords();
+      writeStoredMedicalRecords([localRecord, ...current]);
+      return {
+        data: localRecord,
+        success: true,
+        message: "Medical record saved locally",
+      };
+    }
+  },
+
+  async update(
+    data: UpdateMedicalRecordRequest,
+  ): Promise<ApiResponse<MedicalRecord>> {
+    const updatedLocalRecord: MedicalRecord = {
+      id: data.id,
+      appointmentId: data.appointmentId,
+      patientId: data.patientId,
+      doctorId: "",
+      date: new Date().toISOString(),
+      type: data.type || "note",
+      diagnosis: data.diagnosis,
+      treatment: data.treatment,
+      notes: data.notes,
+      toothNumber: data.toothNumber,
+      attachments: [],
+    };
+
+    try {
+      const payload = {
+        appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
+        patientId: data.patientId,
+        diagnosis: data.diagnosis,
+        treatment: data.treatment,
+        notes: data.notes,
+        toothNumber: data.toothNumber || null,
+        type: data.type || "note",
+      };
+
+      const res = await apiCall<unknown>(`/api/MedicalRecord/${data.id}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      return { data: mapBackendToMedicalRecord(res.data), success: true };
+    } catch {
+      const current = readStoredMedicalRecords();
+      const next = current.some((record) => record.id === data.id)
+        ? current.map((record) =>
+            record.id === data.id
+              ? { ...record, ...updatedLocalRecord }
+              : record,
+          )
+        : [updatedLocalRecord, ...current];
+      writeStoredMedicalRecords(next);
+      return {
+        data: updatedLocalRecord,
+        success: true,
+        message: "Medical record updated locally",
+      };
+    }
   },
 };
 

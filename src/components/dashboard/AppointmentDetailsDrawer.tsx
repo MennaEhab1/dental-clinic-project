@@ -26,6 +26,8 @@ interface AppointmentDetailsDrawerProps {
   onAccept?: (id: string) => void;
   onReject?: (id: string) => void;
   onCancel?: (id: string) => void;
+  isCompleteDisabled?: boolean;
+  completeDisabledReason?: string;
   role?: "patient" | "doctor" | "admin";
 }
 
@@ -36,6 +38,8 @@ export function AppointmentDetailsDrawer({
   onAccept,
   onReject,
   onCancel,
+  isCompleteDisabled = false,
+  completeDisabledReason,
   role = "patient",
 }: AppointmentDetailsDrawerProps) {
   if (!appointment) return null;
@@ -180,6 +184,8 @@ export function AppointmentDetailsDrawer({
               <>
                 <Button
                   className="flex-1 gradient-bg border-0"
+                  disabled={isCompleteDisabled}
+                  title={completeDisabledReason}
                   onClick={() => onAccept?.(appointment.id)}
                 >
                   Mark Complete

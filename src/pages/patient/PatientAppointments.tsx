@@ -10,18 +10,79 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar } from "lucide-react";
 import { Link } from "react-router-dom";
-import { appointmentService } from "@/services/api";
-import type { Appointment } from "@/types";
+import {
+  appointmentCareService,
+  appointmentService,
+  medicalRecordService,
+  prescriptionService,
+} from "@/services/api";
+import type { Appointment, MedicalRecord } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
 export default function PatientAppointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [prescriptionByAppointment, setPrescriptionByAppointment] = useState<
+    Record<string, boolean>
+  >({});
+  const [noPrescriptionByAppointment, setNoPrescriptionByAppointment] =
+    useState<Record<string, boolean>>({});
+  const [recordsByAppointment, setRecordsByAppointment] = useState<
+    Record<string, MedicalRecord[]>
+  >({});
   const [isLoading, setIsLoading] = useState(true);
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { user } = useAuth();
+
+  const hydrateClinicalData = async (nextAppointments: Appointment[]) => {
+    const noPrescriptionMap = appointmentCareService.getNoPrescriptionMap();
+    setNoPrescriptionByAppointment(noPrescriptionMap);
+
+    const nextPrescriptionMap: Record<string, boolean> = {};
+    await Promise.all(
+      nextAppointments
+        .filter((appointment) => appointment.status === "complete")
+        .map(async (appointment) => {
+          try {
+            const result = await prescriptionService.getByAppointment(
+              appointment.id,
+            );
+            nextPrescriptionMap[appointment.id] =
+              !!result.data &&
+              Array.isArray(result.data.medicines) &&
+              result.data.medicines.length > 0;
+          } catch {
+            nextPrescriptionMap[appointment.id] = false;
+          }
+        }),
+    );
+
+    setPrescriptionByAppointment(nextPrescriptionMap);
+
+    const patientId = nextAppointments[0]?.patientId;
+    if (!patientId) {
+      setRecordsByAppointment({});
+      return;
+    }
+
+    try {
+      const medicalRecordsResponse =
+        await medicalRecordService.getByPatient(patientId);
+      const grouped = (medicalRecordsResponse.data || []).reduce<
+        Record<string, MedicalRecord[]>
+      >((acc, record) => {
+        if (!record.appointmentId) return acc;
+        const current = acc[record.appointmentId] || [];
+        acc[record.appointmentId] = [...current, record];
+        return acc;
+      }, {});
+      setRecordsByAppointment(grouped);
+    } catch {
+      setRecordsByAppointment({});
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -63,6 +124,7 @@ export default function PatientAppointments() {
         })),
       );
       setAppointments(response.data);
+      await hydrateClinicalData(response.data);
     } catch (error) {
       console.error(
         "[PatientAppointments] Failed to fetch appointments:",
@@ -95,6 +157,7 @@ export default function PatientAppointments() {
                 "appointments",
               );
               setAppointments(r.data);
+              return hydrateClinicalData(r.data);
             })
             .catch((err) =>
               console.error(
@@ -135,6 +198,7 @@ export default function PatientAppointments() {
               "appointments",
             );
             setAppointments(r.data);
+            await hydrateClinicalData(r.data);
           } catch (err) {
             console.error(
               "[PatientAppointments] Failed to fetch appointments on mount refresh:",
@@ -259,12 +323,17 @@ export default function PatientAppointments() {
                 ) : upcoming.length > 0 ? (
                   <div className="space-y-4">
                     {upcoming.map((appointment) => (
-                      <AppointmentCard
-                        key={appointment.id}
-                        appointment={appointment}
-                        onView={() => handleViewDetails(appointment)}
-                        onCancel={() => handleCancel(appointment.id)}
-                      />
+                      <div key={appointment.id} className="space-y-2">
+                        <AppointmentCard
+                          appointment={appointment}
+                          onView={() => handleViewDetails(appointment)}
+                          onCancel={() => handleCancel(appointment.id)}
+                        />
+                        <div className="px-2 text-xs text-muted-foreground">
+                          Medical records for this visit:{" "}
+                          {recordsByAppointment[appointment.id]?.length || 0}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (
@@ -284,11 +353,33 @@ export default function PatientAppointments() {
                 ) : past.length > 0 ? (
                   <div className="space-y-4">
                     {past.map((appointment) => (
-                      <AppointmentCard
-                        key={appointment.id}
-                        appointment={appointment}
-                        onView={() => handleViewDetails(appointment)}
-                      />
+                      <div key={appointment.id} className="space-y-2">
+                        <AppointmentCard
+                          appointment={appointment}
+                          onView={() => handleViewDetails(appointment)}
+                        />
+                        <div className="px-2 text-xs text-muted-foreground">
+                          {appointment.status === "complete" ? (
+                            prescriptionByAppointment[appointment.id] ? (
+                              <span>
+                                Prescription is available for this visit.
+                              </span>
+                            ) : (
+                              <span>
+                                {noPrescriptionByAppointment[appointment.id]
+                                  ? "No prescription for this visit"
+                                  : "No prescription for this visit"}
+                              </span>
+                            )
+                          ) : (
+                            <span>Appointment is not completed yet.</span>
+                          )}
+                        </div>
+                        <div className="px-2 text-xs text-muted-foreground">
+                          Medical records for this visit:{" "}
+                          {recordsByAppointment[appointment.id]?.length || 0}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (
@@ -308,17 +399,29 @@ export default function PatientAppointments() {
                 ) : appointments.length > 0 ? (
                   <div className="space-y-4">
                     {appointments.map((appointment) => (
-                      <AppointmentCard
-                        key={appointment.id}
-                        appointment={appointment}
-                        onView={() => handleViewDetails(appointment)}
-                        onCancel={
-                          appointment.status !== "cancelled" &&
-                          appointment.status !== "complete"
-                            ? () => handleCancel(appointment.id)
-                            : undefined
-                        }
-                      />
+                      <div key={appointment.id} className="space-y-2">
+                        <AppointmentCard
+                          appointment={appointment}
+                          onView={() => handleViewDetails(appointment)}
+                          onCancel={
+                            appointment.status !== "cancelled" &&
+                            appointment.status !== "complete"
+                              ? () => handleCancel(appointment.id)
+                              : undefined
+                          }
+                        />
+                        {appointment.status === "complete" && (
+                          <div className="px-2 text-xs text-muted-foreground">
+                            {prescriptionByAppointment[appointment.id]
+                              ? "Prescription is available for this visit."
+                              : "No prescription for this visit"}
+                          </div>
+                        )}
+                        <div className="px-2 text-xs text-muted-foreground">
+                          Medical records for this visit:{" "}
+                          {recordsByAppointment[appointment.id]?.length || 0}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 ) : (

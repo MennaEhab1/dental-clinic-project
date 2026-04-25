@@ -2,10 +2,18 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
+import { authService } from "@/services/api";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,6 +22,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [isSendingReset, setIsSendingReset] = useState(false);
+  const [forgotPasswordError, setForgotPasswordError] = useState("");
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {},
   );
@@ -39,6 +51,14 @@ export default function LoginPage() {
       navigate(resolveDashboardRoute(user?.role), { replace: true });
     }
   }, [authLoading, isAuthenticated, navigate, user?.role]);
+
+  useEffect(() => {
+    const resetEmail =
+      (location.state as { resetEmail?: string } | null)?.resetEmail || "";
+    if (resetEmail) {
+      setEmail(resetEmail);
+    }
+  }, [location.state]);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -83,6 +103,34 @@ export default function LoginPage() {
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!forgotPasswordEmail || !/\S+@\S+\.\S+/.test(forgotPasswordEmail)) {
+      setForgotPasswordError("Enter a valid email address");
+      return;
+    }
+
+    setIsSendingReset(true);
+    setForgotPasswordError("");
+
+    try {
+      await authService.forgotPassword({ email: forgotPasswordEmail });
+      toast.success("Password reset email sent. Check your inbox.");
+      setForgotPasswordOpen(false);
+      setEmail(forgotPasswordEmail);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to send reset email";
+      setForgotPasswordError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
@@ -141,9 +189,17 @@ export default function LoginPage() {
               <div>
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  <span className="text-sm text-muted-foreground">
-                    Forgot password in API (not added in UI yet)
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotPasswordEmail(email);
+                      setForgotPasswordError("");
+                      setForgotPasswordOpen(true);
+                    }}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Forgot password?
+                  </button>
                 </div>
                 <div className="relative mt-2">
                   <Input
@@ -221,6 +277,49 @@ export default function LoginPage() {
           </div>
         </motion.div>
       </div>
+
+      <Dialog open={forgotPasswordOpen} onOpenChange={setForgotPasswordOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Forgot Password</DialogTitle>
+            <DialogDescription>
+              Enter your email and we will ask the backend to send you a reset link.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div>
+              <Label htmlFor="forgot-email">Email address</Label>
+              <Input
+                id="forgot-email"
+                type="email"
+                value={forgotPasswordEmail}
+                onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                placeholder="you@example.com"
+                className={`mt-2 ${forgotPasswordError ? "border-destructive" : ""}`}
+              />
+              {forgotPasswordError && (
+                <p className="text-xs text-destructive mt-1">{forgotPasswordError}</p>
+              )}
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full gradient-bg border-0"
+              disabled={isSendingReset}
+            >
+              {isSendingReset ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                "Send Reset Link"
+              )}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Right Side - Image */}
       <div className="hidden lg:block lg:w-1/2 relative">

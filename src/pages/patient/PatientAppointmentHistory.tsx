@@ -58,8 +58,7 @@ export default function PatientAppointmentHistory() {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             return (
-              aptDate < today ||
-              ["completed", "cancelled", "no-show"].includes(apt.status)
+              aptDate < today || ["complete", "cancelled"].includes(apt.status)
             );
           });
 
@@ -71,7 +70,7 @@ export default function PatientAppointmentHistory() {
           // Fetch prescription details for completed appointments
           const appointmentsWithPrescriptions = await Promise.all(
             sortedAppointments.map(async (apt) => {
-              if (apt.status === "completed" && apt.id) {
+              if (apt.status === "complete" && apt.id) {
                 try {
                   const prscResult = await prescriptionService.getByAppointment(
                     apt.id,
@@ -418,7 +417,7 @@ ${
                 )}
 
                 {/* Write Review Button */}
-                {selectedAppointment.status === "completed" && (
+                {selectedAppointment.status === "complete" && (
                   <>
                     <Separator />
                     <Button className="w-full gap-2" variant="default">

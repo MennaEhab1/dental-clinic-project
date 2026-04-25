@@ -115,7 +115,7 @@ export default function PatientReviews() {
     if (doctorAppointments.length === 0) return null;
 
     const completedAppointment = doctorAppointments.find(
-      (appointment) => appointment.status === "completed",
+      (appointment) => appointment.status === "complete",
     );
 
     return String((completedAppointment || doctorAppointments[0]).id);

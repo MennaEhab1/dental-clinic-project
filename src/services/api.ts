@@ -40,7 +40,9 @@ import type {
 import type {
   BookAppointmentDto,
   CreatePrescriptionDto,
+  ForgotPasswordDTO,
   PrescriptionDetailsDTO,
+  ResetPasswordDTO,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -72,47 +74,50 @@ function normalizeSpecialty(value?: string | null): DentalSpecialty {
 
 function normalizeAppointmentStatus(
   value: unknown,
-):
-  | "pending"
-  | "confirmed"
-  | "in-progress"
-  | "completed"
-  | "cancelled"
-  | "no-show" {
+): "upcoming" | "complete" | "cancelled" {
   if (typeof value === "number") {
     switch (value) {
       case 0:
-        return "pending";
       case 1:
-        return "confirmed";
+        return "upcoming";
       case 2:
-        return "completed";
+        return "complete";
       case 3:
-        return "cancelled";
       case 4:
-        return "no-show";
+        return "cancelled";
       default:
-        return "pending";
+        return "upcoming";
     }
   }
 
-  const normalized = String(value || "pending")
+  const normalized = String(value || "upcoming")
     .toLowerCase()
     .trim();
-  if (normalized === "inprogress") return "in-progress";
 
   if (
     normalized === "pending" ||
     normalized === "confirmed" ||
     normalized === "in-progress" ||
-    normalized === "completed" ||
-    normalized === "cancelled" ||
-    normalized === "no-show"
+    normalized === "inprogress" ||
+    normalized === "upcoming"
   ) {
-    return normalized;
+    return "upcoming";
   }
 
-  return "pending";
+  if (normalized === "completed" || normalized === "complete") {
+    return "complete";
+  }
+
+  if (
+    normalized === "cancelled" ||
+    normalized === "canceled" ||
+    normalized === "no-show" ||
+    normalized === "noshow"
+  ) {
+    return "cancelled";
+  }
+
+  return "upcoming";
 }
 
 function toSafeNumber(value: unknown): number {
@@ -141,6 +146,33 @@ function splitName(fullName?: string | null): {
   return {
     firstName: parts[0],
     lastName: parts.slice(1).join(" "),
+  };
+}
+
+function formatDateTimeInEgypt(date: Date): { date: string; time: string } {
+  const dateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const timeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Cairo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const year = dateParts.find((part) => part.type === "year")?.value || "";
+  const month = dateParts.find((part) => part.type === "month")?.value || "";
+  const day = dateParts.find((part) => part.type === "day")?.value || "";
+  const hour = timeParts.find((part) => part.type === "hour")?.value || "";
+  const minute = timeParts.find((part) => part.type === "minute")?.value || "";
+
+  return {
+    date: `${year}-${month}-${day}`,
+    time: `${hour}:${minute}`,
   };
 }
 
@@ -402,13 +434,27 @@ async function apiCall<T>(
 
   // Handle HTTP errors
   if (!response.ok) {
-    // 401 Unauthorized - clear stored token and notify app
-    if (response.status === 401) {
+    const normalizedErrorText = String(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      data && typeof data === "object"
+        ? (data as any).message || ""
+        : data || "",
+    )
+      .toLowerCase()
+      .trim();
+    const isUnauthorizedResponse =
+      response.status === 401 ||
+      response.status === 403 ||
+      normalizedErrorText.includes("unauthorized") ||
+      normalizedErrorText.includes("forbidden");
+
+    // Auth failure - clear stored token and notify app
+    if (isUnauthorizedResponse) {
       const token = getAuthToken();
       const decodedToken = token ? decodeJWT(token) : null;
       const patientId = token ? extractPatientIdFromToken(token) : null;
 
-      console.error("[apiCall] ❌ 401 Unauthorized:", endpoint);
+      console.error("[apiCall] ❌ Auth failure:", endpoint);
       console.error("[apiCall] REQUEST ENDPOINT:", endpoint);
       console.error("[apiCall] BACKEND RESPONSE:", data);
       console.error("[apiCall] Your Patient ID:", patientId);
@@ -430,10 +476,11 @@ async function apiCall<T>(
       }
 
       console.warn(
-        "[apiCall] 401 Error details:",
+        "[apiCall] Auth error details:",
         JSON.stringify(
           {
             endpoint,
+            status: response.status,
             tokenPresent: !!token,
             extractedPatientId: patientId,
             backendResponse: data,
@@ -567,6 +614,42 @@ async function apiCall<T>(
 // Authentication Services
 // Real backend integration - no mock data used
 export const authService = {
+  hasStoredToken(): boolean {
+    return !!getAuthToken();
+  },
+
+  async forgotPassword(data: ForgotPasswordDTO): Promise<ApiResponse<void>> {
+    await apiCall<void>("/api/Account/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: data.email,
+      }),
+    });
+
+    return {
+      data: undefined,
+      success: true,
+      message: "Password reset email sent",
+    };
+  },
+
+  async resetPassword(data: ResetPasswordDTO): Promise<ApiResponse<void>> {
+    await apiCall<void>("/api/Account/reset-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email: data.email,
+        token: data.token,
+        newPassword: data.newPassword,
+      }),
+    });
+
+    return {
+      data: undefined,
+      success: true,
+      message: "Password updated successfully",
+    };
+  },
+
   /**
    * Login with email and password
    * POST /api/Account/login
@@ -1556,20 +1639,15 @@ export const appointmentService = {
       serviceData: item?.service,
     });
 
-    const appointmentDate =
-      item.appointmentDate ||
-      item.date ||
-      item.dateTime ||
-      item.createdAt ||
-      item.dateCreated ||
-      null;
+    const appointmentDate = item.appointmentDate || item.date || item.dateTime;
     let date = "";
     let time = "";
     if (appointmentDate) {
       const d = new Date(appointmentDate as string | number | Date);
       if (!isNaN(d.getTime())) {
-        date = d.toISOString().split("T")[0];
-        time = d.toISOString().split("T")[1].slice(0, 5);
+        const egyptDateTime = formatDateTimeInEgypt(d);
+        date = egyptDateTime.date;
+        time = egyptDateTime.time;
       }
     }
 
@@ -2330,8 +2408,7 @@ export const adminAppointmentService = {
 
       // Validate that appointments have proper data - if not, use mock data
       const hasValidAppointments = appointments.some(
-        (a) =>
-          a.patientId || a.doctorId || (a.status && a.status !== "pending"),
+        (a) => a.patientId || a.doctorId || !!a.status,
       );
 
       if (appointments.length === 0 || !hasValidAppointments) {

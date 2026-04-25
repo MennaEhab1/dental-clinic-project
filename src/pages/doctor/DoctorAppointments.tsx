@@ -69,10 +69,8 @@ export default function DoctorAppointments() {
     return aptDate === new Date().toDateString();
   });
 
-  const pending = appointments.filter((a) => a.status === "pending");
-  const upcoming = appointments.filter(
-    (a) => a.status === "confirmed" || a.status === "pending",
-  );
+  const completed = appointments.filter((a) => a.status === "complete");
+  const upcoming = appointments.filter((a) => a.status === "upcoming");
 
   const handleAccept = async (id: string) => {
     setActioningAppointmentId(id);
@@ -81,8 +79,8 @@ export default function DoctorAppointments() {
       await fetchAppointments();
       setDrawerOpen(false);
       toast({
-        title: "Appointment Completed",
-        description: "The appointment has been marked as completed.",
+        title: "Appointment Complete",
+        description: "The appointment has been marked as complete.",
       });
     } catch (error) {
       console.error("Failed to complete appointment:", error);
@@ -159,9 +157,9 @@ export default function DoctorAppointments() {
               </div>
               <div>
                 <p className="text-xl font-bold text-foreground">
-                  {pending.length}
+                  {completed.length}
                 </p>
-                <p className="text-xs text-muted-foreground">Pending</p>
+                <p className="text-xs text-muted-foreground">Complete</p>
               </div>
             </CardContent>
           </Card>
@@ -192,10 +190,8 @@ export default function DoctorAppointments() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="confirmed">Confirmed</SelectItem>
-                <SelectItem value="in-progress">In Progress</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="upcoming">Upcoming</SelectItem>
+                <SelectItem value="complete">Complete</SelectItem>
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
@@ -240,7 +236,7 @@ export default function DoctorAppointments() {
                         </div>
                         <div className="flex items-center gap-2">
                           <StatusBadge status={apt.status} />
-                          {apt.status === "pending" && (
+                          {apt.status === "upcoming" && (
                             <div className="flex gap-1 ml-2">
                               <Button
                                 size="sm"
@@ -253,7 +249,7 @@ export default function DoctorAppointments() {
                                 }}
                               >
                                 <CheckCircle className="w-3.5 h-3.5 mr-1" />{" "}
-                                Accept
+                                Complete
                               </Button>
                               <Button
                                 size="sm"
@@ -265,7 +261,7 @@ export default function DoctorAppointments() {
                                   handleReject(apt.id);
                                 }}
                               >
-                                <X className="w-3.5 h-3.5 mr-1" /> Reject
+                                <X className="w-3.5 h-3.5 mr-1" /> Cancel
                               </Button>
                             </div>
                           )}

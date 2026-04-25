@@ -11,7 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Calendar,
-  Clock,
+  XCircle,
   CheckCircle,
   MessageSquare,
   ArrowRight,
@@ -111,22 +111,22 @@ export default function PatientDashboard() {
   // Filter appointments by date and status
   const upcomingCount = appointments.filter((a) => {
     const isPast = isAppointmentPast(a.date);
-    return !isPast && (a.status === "confirmed" || a.status === "pending");
+    return !isPast && a.status === "upcoming";
   }).length;
 
   const completedCount = appointments.filter((a) => {
     const isPast = isAppointmentPast(a.date);
-    return isPast || a.status === "completed";
+    return isPast || a.status === "complete";
   }).length;
 
-  const pendingCount = appointments.filter(
-    (a) => a.status === "pending",
+  const cancelledCount = appointments.filter(
+    (a) => a.status === "cancelled",
   ).length;
 
   const lastVisit = appointments
     .filter((a) => {
       const isPast = isAppointmentPast(a.date);
-      return isPast && a.status === "completed";
+      return isPast && a.status === "complete";
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
@@ -139,18 +139,18 @@ export default function PatientDashboard() {
       bg: "bg-primary/10",
     },
     {
-      label: "Completed",
+      label: "Complete",
       value: completedCount,
       icon: CheckCircle,
       color: "text-success",
       bg: "bg-success/10",
     },
     {
-      label: "Pending",
-      value: pendingCount,
-      icon: Clock,
-      color: "text-warning",
-      bg: "bg-warning/10",
+      label: "Cancelled",
+      value: cancelledCount,
+      icon: XCircle,
+      color: "text-destructive",
+      bg: "bg-destructive/10",
     },
     {
       label: "Messages",
@@ -225,19 +225,13 @@ export default function PatientDashboard() {
                 <LoadingCard />
               ) : appointments.filter((a) => {
                   const isPast = isAppointmentPast(a.date);
-                  return (
-                    !isPast &&
-                    (a.status === "confirmed" || a.status === "pending")
-                  );
+                  return !isPast && a.status === "upcoming";
                 }).length > 0 ? (
                 <div className="space-y-3">
                   {appointments
                     .filter((a) => {
                       const isPast = isAppointmentPast(a.date);
-                      return (
-                        !isPast &&
-                        (a.status === "confirmed" || a.status === "pending")
-                      );
+                      return !isPast && a.status === "upcoming";
                     })
                     .slice(0, 3)
                     .map((appointment) => (

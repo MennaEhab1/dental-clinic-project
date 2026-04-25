@@ -33,6 +33,16 @@ export interface UserDTO {
   token?: string | null;
 }
 
+export interface ForgotPasswordDTO {
+  email?: string | null;
+}
+
+export interface ResetPasswordDTO {
+  email?: string | null;
+  token?: string | null;
+  newPassword?: string | null;
+}
+
 export interface PrescriptionMedicineDto {
   medicineId: number;
   dosage?: string | null;
@@ -67,8 +77,10 @@ export interface PrescriptionDetailsDTO {
 // Export a consolidated namespace for convenience
 export const SwaggerTypes = {
   BookAppointmentDto: undefined as unknown as BookAppointmentDto,
+  ForgotPasswordDTO: undefined as unknown as ForgotPasswordDTO,
   LoginDTO: undefined as unknown as LoginDTO,
   RegisterDTO: undefined as unknown as RegisterDTO,
+  ResetPasswordDTO: undefined as unknown as ResetPasswordDTO,
   UserDTO: undefined as unknown as UserDTO,
   CreatePrescriptionDto: undefined as unknown as CreatePrescriptionDto,
   PrescriptionDetailsDTO: undefined as unknown as PrescriptionDetailsDTO,

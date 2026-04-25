@@ -239,7 +239,7 @@ export default function BookingPage() {
         date: booking.date,
         time: booking.time,
         duration: selectedService?.duration || 30,
-        status: "pending",
+        status: "upcoming",
         notes: booking.notes,
       });
 

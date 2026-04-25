@@ -91,13 +91,7 @@ export interface Appointment {
   updatedAt: string;
 }
 
-export type AppointmentStatus =
-  | "pending"
-  | "confirmed"
-  | "in-progress"
-  | "completed"
-  | "cancelled"
-  | "no-show";
+export type AppointmentStatus = "upcoming" | "complete" | "cancelled";
 
 export interface TimeSlot {
   id: string;

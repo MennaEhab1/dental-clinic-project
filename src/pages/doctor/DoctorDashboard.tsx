@@ -68,7 +68,7 @@ export default function DoctorDashboard() {
               `${appointment.patient?.firstName || "Patient"} ${appointment.patient?.lastName || ""} • ${appointment.date} ${appointment.time}`.trim(),
             type: "appointment",
             isRead:
-              appointment.status === "completed" ||
+              appointment.status === "complete" ||
               appointment.status === "cancelled",
             createdAt: appointment.updatedAt || appointment.createdAt,
           }));
@@ -99,7 +99,7 @@ export default function DoctorDashboard() {
       bg: "bg-accent/10",
     },
     {
-      label: "Pending",
+      label: "Upcoming",
       value: stats?.pendingAppointments || 0,
       icon: Clock,
       color: "text-warning",
@@ -115,7 +115,7 @@ export default function DoctorDashboard() {
   ];
 
   const todayAppointments = appointments.filter(
-    (a) => a.status !== "cancelled" && a.status !== "completed",
+    (a) => a.status !== "cancelled" && a.status !== "complete",
   );
 
   return (

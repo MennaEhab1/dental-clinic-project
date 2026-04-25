@@ -17,24 +17,61 @@ export function convertEgyptTimeToUTC(
   dateStr: string,
   timeStr: string,
 ): string {
-  // Create a date/time combination
-  const dateTimeStr = `${dateStr}T${timeStr}`;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeMatch = timeStr.match(/^(\d{2}):(\d{2})$/);
+  if (!match || !timeMatch) {
+    return new Date(`${dateStr}T${timeStr}`).toISOString();
+  }
 
-  // Create date in local browser timezone
-  const localDate = new Date(dateTimeStr);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
 
-  // Get local timezone offset in minutes
-  // Note: getTimezoneOffset() returns -(UTC offset), so UTC+2 becomes -120
-  const localOffset = localDate.getTimezoneOffset();
+  const getTimeZoneOffsetMs = (date: Date, timeZone: string): number => {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    const parts = formatter.formatToParts(date);
 
-  // Egypt timezone offset: UTC+2 means -120 in getTimezoneOffset terms
-  const egyptOffset = -120;
+    const getValue = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((part) => part.type === type)?.value || 0);
 
-  // Calculate the difference between Egypt timezone and local timezone
-  const timezoneShift = (egyptOffset - localOffset) * 60000; // convert to milliseconds
+    const tzAsUTC = Date.UTC(
+      getValue("year"),
+      getValue("month") - 1,
+      getValue("day"),
+      getValue("hour"),
+      getValue("minute"),
+      getValue("second"),
+    );
 
-  // Adjust the date to represent Egypt time converted to UTC
-  const adjustedDate = new Date(localDate.getTime() + timezoneShift);
+    return tzAsUTC - date.getTime();
+  };
 
-  return adjustedDate.toISOString();
+  const cairoTimeZone = "Africa/Cairo";
+
+  // Start from the wall-clock date/time components and solve for UTC instant in Cairo.
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const initialOffset = getTimeZoneOffsetMs(new Date(utcGuess), cairoTimeZone);
+  let targetUtc = utcGuess - initialOffset;
+
+  // Re-check once to handle DST boundary transitions robustly.
+  const correctedOffset = getTimeZoneOffsetMs(
+    new Date(targetUtc),
+    cairoTimeZone,
+  );
+  if (correctedOffset !== initialOffset) {
+    targetUtc = utcGuess - correctedOffset;
+  }
+
+  return new Date(targetUtc).toISOString();
 }

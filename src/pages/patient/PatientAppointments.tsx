@@ -171,17 +171,12 @@ export default function PatientAppointments() {
 
   const upcoming = appointments.filter((a) => {
     const isPast = isAppointmentPast(a.date);
-    return !isPast && (a.status === "confirmed" || a.status === "pending");
+    return !isPast && a.status === "upcoming";
   });
 
   const past = appointments.filter((a) => {
     const isPast = isAppointmentPast(a.date);
-    return (
-      isPast ||
-      a.status === "completed" ||
-      a.status === "cancelled" ||
-      a.status === "no-show"
-    );
+    return isPast || a.status === "complete" || a.status === "cancelled";
   });
 
   // Debug logging for filtering
@@ -319,7 +314,7 @@ export default function PatientAppointments() {
                         onView={() => handleViewDetails(appointment)}
                         onCancel={
                           appointment.status !== "cancelled" &&
-                          appointment.status !== "completed"
+                          appointment.status !== "complete"
                             ? () => handleCancel(appointment.id)
                             : undefined
                         }

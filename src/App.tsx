@@ -19,6 +19,7 @@ import ServicesPage from "./pages/ServicesPage";
 import DoctorsPage from "./pages/DoctorsPage";
 import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 import BookingPage from "./pages/booking/BookingPage";
 import BookingConfirmation from "./pages/booking/BookingConfirmation";
 import NotFound from "./pages/NotFound";
@@ -82,6 +83,11 @@ function RoleRoute({
   return children;
 }
 
+function ResetPasswordApiRedirect() {
+  const location = useLocation();
+  return <Navigate to={`/reset-password${location.search}`} replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
@@ -97,6 +103,11 @@ const App = () => (
               <Route path="/doctors" element={<DoctorsPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route
+                path="/api/Account/reset-password"
+                element={<ResetPasswordApiRedirect />}
+              />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/booking" element={<BookingPage />} />
               <Route
                 path="/booking/confirmation"

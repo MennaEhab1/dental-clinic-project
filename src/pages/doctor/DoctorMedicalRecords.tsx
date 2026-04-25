@@ -104,7 +104,7 @@ export default function DoctorMedicalRecords() {
             patient:
               appointment.patient || patientMap.get(appointment.patientId),
             date: appointment.date,
-            type: appointment.status === "completed" ? "treatment" : "note",
+            type: appointment.status === "complete" ? "treatment" : "note",
             diagnosis: appointment.service?.name || "Dental consultation",
             treatment: appointment.notes || "Follow-up and treatment plan",
             notes: appointment.notes || "No additional notes.",

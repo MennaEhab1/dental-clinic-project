@@ -51,13 +51,13 @@ export default function AdminDashboard() {
           totalDoctors: doctorList.length,
           todayAppointments: appointmentList.length,
           completedAppointments: appointmentList.filter(
-            (item) => item.status === "completed",
+            (item) => item.status === "complete",
           ).length,
           pendingAppointments: appointmentList.filter(
-            (item) => item.status === "pending",
+            (item) => item.status === "upcoming",
           ).length,
           revenue: appointmentList
-            .filter((item) => item.status === "completed")
+            .filter((item) => item.status === "complete")
             .reduce((sum, item) => sum + (item.service?.price || 0), 0),
         });
       } catch (error) {
@@ -105,10 +105,9 @@ export default function AdminDashboard() {
   ];
 
   const statusColors: Record<string, string> = {
-    pending: "bg-warning/10 text-warning",
-    confirmed: "bg-primary/10 text-primary",
-    completed: "bg-success/10 text-success",
-    "in-progress": "bg-accent/10 text-accent",
+    upcoming: "bg-primary/10 text-primary",
+    complete: "bg-success/10 text-success",
+    cancelled: "bg-destructive/10 text-destructive",
   };
 
   return (

@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Search, Filter, X, Check } from "lucide-react";
 import { adminAppointmentService } from "@/services/api";
-import type { Appointment } from "@/types";
+import type { Appointment, AppointmentStatus } from "@/types";
 import { toast } from "@/hooks/use-toast";
 
 export default function AdminAppointments() {
@@ -62,11 +62,12 @@ export default function AdminAppointments() {
 
   const handleStatusChange = async (
     appointmentId: string,
-    newStatus: string,
+    newStatus: AppointmentStatus,
   ) => {
     try {
       setIsUpdating(true);
-      await adminAppointmentService.updateStatus(appointmentId, newStatus);
+      const backendStatus = newStatus === "complete" ? "completed" : newStatus;
+      await adminAppointmentService.updateStatus(appointmentId, backendStatus);
       setAppointments((prev) =>
         prev.map((apt) =>
           apt.id === appointmentId ? { ...apt, status: newStatus } : apt,
@@ -143,10 +144,8 @@ export default function AdminAppointments() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="confirmed">Confirmed</SelectItem>
-              <SelectItem value="in-progress">In Progress</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="upcoming">Upcoming</SelectItem>
+              <SelectItem value="complete">Complete</SelectItem>
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
@@ -232,19 +231,19 @@ export default function AdminAppointments() {
                             View Details
                           </Button>
                           {apt.status !== "cancelled" &&
-                            apt.status !== "completed" && (
+                            apt.status !== "complete" && (
                               <>
-                                {apt.status === "pending" && (
+                                {apt.status === "upcoming" && (
                                   <Button
                                     size="sm"
                                     className="gap-1"
                                     onClick={() =>
-                                      handleStatusChange(apt.id, "confirmed")
+                                      handleStatusChange(apt.id, "complete")
                                     }
                                     disabled={isUpdating}
                                   >
                                     <Check className="w-3 h-3" />
-                                    Confirm
+                                    Complete
                                   </Button>
                                 )}
                                 <Button

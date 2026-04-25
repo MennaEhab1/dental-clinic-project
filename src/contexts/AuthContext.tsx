@@ -92,7 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const restoreAuthState = () => {
       try {
         const storedUserJson = localStorage.getItem("auth_user");
-        if (storedUserJson) {
+        const hasStoredToken = authService.hasStoredToken();
+
+        if (storedUserJson && hasStoredToken) {
           const storedUser = normalizeBackendUser(
             JSON.parse(storedUserJson) as BackendUser,
           );
@@ -101,6 +103,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             storedUser.userName,
           );
           setUser(storedUser);
+        } else if (storedUserJson && !hasStoredToken) {
+          console.warn(
+            "[AuthContext] Found stored user without auth token, clearing stale session",
+          );
+          localStorage.removeItem("auth_user");
+          setUser(null);
         } else {
           console.debug("[AuthContext] No stored user found");
         }
@@ -243,7 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isLoading,
-        isAuthenticated: !!user,
+        isAuthenticated: !!user && authService.hasStoredToken(),
         login,
         register,
         logout,

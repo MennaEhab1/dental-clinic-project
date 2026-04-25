@@ -115,7 +115,7 @@ export default function PatientMedicalRecords() {
       try {
         const appointmentsRes = await appointmentService.getByPatient();
         const appointments = (appointmentsRes.data || []).filter(
-          (appointment) => appointment.status === "completed",
+          (appointment) => appointment.status === "complete",
         );
 
         const prescriptionMap = new Map<string, Prescription>();

@@ -1,44 +1,38 @@
-import { motion } from 'framer-motion';
-import { Badge } from '@/components/ui/badge';
-import { Calendar, Clock, User, Stethoscope } from 'lucide-react';
-import type { Appointment } from '@/types';
+import { motion } from "framer-motion";
+import { Badge } from "@/components/ui/badge";
+import { Calendar, Clock, User, Stethoscope } from "lucide-react";
+import type { Appointment } from "@/types";
 
 interface AppointmentCardProps {
   appointment: Appointment;
-  variant?: 'default' | 'compact';
+  variant?: "default" | "compact";
   onView?: () => void;
   onCancel?: () => void;
 }
 
 const statusStyles: Record<string, string> = {
-  pending: 'bg-warning/10 text-warning border-warning/20',
-  confirmed: 'bg-primary/10 text-primary border-primary/20',
-  'in-progress': 'bg-accent/10 text-accent border-accent/20',
-  completed: 'bg-success/10 text-success border-success/20',
-  cancelled: 'bg-destructive/10 text-destructive border-destructive/20',
-  'no-show': 'bg-muted text-muted-foreground border-border',
+  upcoming: "bg-primary/10 text-primary border-primary/20",
+  complete: "bg-success/10 text-success border-success/20",
+  cancelled: "bg-destructive/10 text-destructive border-destructive/20",
 };
 
 const statusLabels: Record<string, string> = {
-  pending: 'Pending',
-  confirmed: 'Confirmed',
-  'in-progress': 'In Progress',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  'no-show': 'No Show',
+  upcoming: "Upcoming",
+  complete: "Complete",
+  cancelled: "Cancelled",
 };
 
-export function AppointmentCard({ 
-  appointment, 
-  variant = 'default',
+export function AppointmentCard({
+  appointment,
+  variant = "default",
   onView,
-  onCancel 
+  onCancel,
 }: AppointmentCardProps) {
   const doctor = appointment.doctor;
   const patient = appointment.patient;
   const service = appointment.service;
 
-  if (variant === 'compact') {
+  if (variant === "compact") {
     return (
       <motion.div
         whileHover={{ x: 4 }}
@@ -49,10 +43,11 @@ export function AppointmentCard({
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-medium text-foreground truncate">
-            {service?.name || 'Dental Appointment'}
+            {service?.name || "Dental Appointment"}
           </p>
           <p className="text-sm text-muted-foreground">
-            {new Date(appointment.date).toLocaleDateString()} at {appointment.time}
+            {new Date(appointment.date).toLocaleDateString()} at{" "}
+            {appointment.time}
           </p>
         </div>
         <Badge className={statusStyles[appointment.status]}>
@@ -75,7 +70,7 @@ export function AppointmentCard({
           </div>
           <div>
             <h4 className="font-semibold text-foreground">
-              {service?.name || 'Dental Appointment'}
+              {service?.name || "Dental Appointment"}
             </h4>
             <Badge className={`${statusStyles[appointment.status]} mt-1`}>
               {statusLabels[appointment.status]}
@@ -88,11 +83,11 @@ export function AppointmentCard({
         <div className="flex items-center gap-3 text-sm">
           <Calendar className="w-4 h-4 text-primary" />
           <span className="text-muted-foreground">
-            {new Date(appointment.date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric',
+            {new Date(appointment.date).toLocaleDateString("en-US", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
             })}
           </span>
         </div>
@@ -130,14 +125,16 @@ export function AppointmentCard({
               View Details
             </button>
           )}
-          {onCancel && appointment.status !== 'cancelled' && appointment.status !== 'completed' && (
-            <button
-              onClick={onCancel}
-              className="flex-1 py-2 text-sm font-medium text-destructive hover:bg-destructive/5 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-          )}
+          {onCancel &&
+            appointment.status !== "cancelled" &&
+            appointment.status !== "complete" && (
+              <button
+                onClick={onCancel}
+                className="flex-1 py-2 text-sm font-medium text-destructive hover:bg-destructive/5 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            )}
         </div>
       )}
     </motion.div>

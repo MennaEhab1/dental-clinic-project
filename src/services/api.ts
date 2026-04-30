@@ -11,7 +11,6 @@
  */
 
 import { ApiResponse, PaginatedResponse } from "@/types";
-import { convertEgyptTimeToUTC } from "@/lib/utils";
 import {
   mockDoctors,
   mockPatients,
@@ -175,6 +174,31 @@ function formatDateTimeInEgypt(date: Date): { date: string; time: string } {
     date: `${year}-${month}-${day}`,
     time: `${hour}:${minute}`,
   };
+}
+
+function resolveBackendAssetUrl(value?: string | null): string | undefined {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+
+  // Some backend payloads return values like "'/images/specialities/Name.png'".
+  const cleaned = raw.replace(/^['"]+|['"]+$/g, "").trim();
+  if (!cleaned) return undefined;
+
+  let normalized: string;
+  if (/^https?:\/\//i.test(cleaned)) {
+    normalized = cleaned;
+  } else if (cleaned.startsWith("/")) {
+    normalized = `${BASE_URL}${cleaned}`;
+  } else {
+    normalized = `${BASE_URL}/${cleaned}`;
+  }
+
+  // Preserve URL shape while ensuring spaces and unsafe chars are encoded.
+  try {
+    return encodeURI(normalized);
+  } catch {
+    return normalized;
+  }
 }
 
 function mapBackendDashboardStats(raw: unknown): DashboardStats {
@@ -1371,7 +1395,18 @@ export const doctorService = {
     doctorId: string,
     date: string,
   ): Promise<ApiResponse<string[]>> {
-    await delay(400);
+    try {
+      const result = await doctorScheduleService.getAvailableSlots(
+        doctorId,
+        date,
+      );
+      if (result.success && result.data && result.data.length > 0) {
+        return result;
+      }
+    } catch {
+      // fall through to default slots
+    }
+    // Fallback to hardcoded slots when backend returns empty or fails
     const slots = [
       "09:00",
       "09:30",
@@ -1708,6 +1743,36 @@ export const adminPatientService = {
     );
     throw new Error("Failed to update patient status");
   },
+
+  /**
+   * Create a new patient (admin)
+   * POST /api/admin/CreatePatients
+   * Expects CreatePatientByAdminDTO: { fullName, phoneNumber, email }
+   */
+  async create(data: {
+    fullName: string;
+    email: string;
+    phoneNumber?: string;
+  }): Promise<ApiResponse<Patient>> {
+    try {
+      const res = await apiCall<unknown>("/api/admin/CreatePatients", {
+        method: "POST",
+        body: JSON.stringify({
+          fullName: data.fullName,
+          email: data.email,
+          phoneNumber: data.phoneNumber ?? "",
+        }),
+      });
+      return {
+        data: adminPatientService.mapBackendToPatient(res.data ?? {}),
+        success: true,
+        message: "Patient created successfully",
+      };
+    } catch (error) {
+      console.error("[adminPatientService.create] Error:", error);
+      return { data: {} as Patient, success: false };
+    }
+  },
 };
 
 // Appointment Services
@@ -1806,51 +1871,55 @@ export const appointmentService = {
   async create(
     data: Omit<Appointment, "id" | "createdAt" | "updatedAt">,
   ): Promise<ApiResponse<Appointment>> {
-    // Extract dentist ID - try to intelligently parse different formats
-    let dentistId: string | number = 1; // default fallback
+    // Extract numeric dentist ID
+    let doctorId: number = 1;
     const doctorIdStr = data.doctorId?.toString() ?? "";
-
-    // If it's already numeric, use it
     if (!isNaN(Number(doctorIdStr))) {
-      dentistId = Number(doctorIdStr);
-    } else if (doctorIdStr) {
-      // Try to extract numeric part (e.g., "doc-123" → 123)
+      doctorId = Number(doctorIdStr);
+    } else {
       const numericMatch = doctorIdStr.match(/\d+/);
-      if (numericMatch) {
-        dentistId = Number(numericMatch[0]);
-      }
+      if (numericMatch) doctorId = Number(numericMatch[0]);
     }
+
+    // Extract numeric patient ID
+    let patientId: number | undefined;
+    const patientIdStr = data.patientId?.toString() ?? "";
+    if (patientIdStr && !isNaN(Number(patientIdStr))) {
+      patientId = Number(patientIdStr);
+    } else {
+      const numericMatch = patientIdStr.match(/\d+/);
+      if (numericMatch) patientId = Number(numericMatch[0]);
+    }
+
+    // Build date as ISO date-time (date part only, midnight UTC)
+    const dateIso = data.date
+      ? new Date(`${data.date}T00:00:00`).toISOString()
+      : new Date().toISOString();
+
+    // Build startTime as time-span string "HH:mm:ss"
+    const startTime = data.time
+      ? data.time.includes(":") && data.time.split(":").length === 2
+        ? `${data.time}:00`
+        : data.time
+      : "09:00:00";
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dto: any = {
-      dentistId,
-      appointmentDate: convertEgyptTimeToUTC(data.date, data.time),
+      doctorId,
+      date: dateIso,
+      startTime,
+      amount: 0,
+      paymentMethod: "Cash",
     };
 
-    // Add optional fields if they exist in the data
-    if (data.serviceId) dto.serviceId = data.serviceId;
-    if (data.notes) dto.notes = data.notes;
+    if (patientId !== undefined) dto.patientId = patientId;
 
-    // Log full context for debugging
     const token = getAuthToken();
-    const decodedClaims = token ? decodeJWT(token) : null;
-    const patientId = token ? extractPatientIdFromToken(token) : null;
+    const patientIdFromToken = token ? extractPatientIdFromToken(token) : null;
 
-    console.debug(
-      "[appointmentService.create] Booking appointment with dentist",
-      {
-        selectedDoctorId: data.doctorId,
-        parsedDentistId: dentistId,
-        dentistIdType: typeof dentistId,
-      },
-    );
-
-    console.debug("[appointmentService.create] Full booking details", {
-      endpoint: "/api/PatientAppointment/BookAppointment",
-      requestDto: dto,
-      requestDtoJson: JSON.stringify(dto),
-      tokenPresent: !!token,
-      extractedPatientId: patientId,
+    console.debug("[appointmentService.create] Booking appointment:", {
+      dto,
+      patientIdFromToken,
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1859,7 +1928,6 @@ export const appointmentService = {
       body: JSON.stringify(dto),
     });
 
-    // Server should return created appointment details
     const appointmentData = res.data || {};
     return {
       data: appointmentService.mapBackendToAppointment(appointmentData, data),
@@ -2082,6 +2150,7 @@ export const serviceService = {
           duration: 30, // Default duration
           category: spec.name ?? "General",
           icon: "stethoscope",
+          image: resolveBackendAssetUrl(spec.imageUrl ?? spec.image),
           available: true,
         })) as unknown as Service[];
         return { data: services, success: true };
@@ -2735,17 +2804,34 @@ export const adminAppointmentService = {
   /**
    * Create appointment (admin)
    * POST /api/admin/appointments
+   * Uses CreateAppointmentByAdminDTO: doctorID, patientID, date, startTime, amount, paymentMethod
    */
   async create(
     data: Omit<Appointment, "id" | "createdAt" | "updatedAt">,
   ): Promise<ApiResponse<Appointment>> {
     try {
+      const doctorID = Number(data.doctorId) || 0;
+      const patientID = Number(data.patientId) || 0;
+
+      const dateIso = data.date
+        ? new Date(`${data.date}T00:00:00`).toISOString()
+        : new Date().toISOString();
+
+      const startTime = data.time
+        ? data.time.includes(":") && data.time.split(":").length === 2
+          ? `${data.time}:00`
+          : data.time
+        : "09:00:00";
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: any = {
-        dentistId: data.doctorId,
-        appointmentDate: convertEgyptTimeToUTC(data.date, data.time),
-        serviceId: data.serviceId,
-        notes: data.notes,
+        doctorID,
+        patientID,
+        date: dateIso,
+        startTime,
+        amount: 0,
+        paymentMethod: "Cash",
+        paymentStatus: "Unpaid",
       };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3005,6 +3091,137 @@ export const adminSpecialityService = {
     } catch (error) {
       console.error("[adminSpecialityService.delete] Error:", error);
       return { data: undefined, success: false };
+    }
+  },
+};
+
+// ============================================================
+// NOTIFICATION SERVICE
+// ============================================================
+
+export interface BackendNotification {
+  id: number;
+  message: string;
+  isRead: boolean;
+  createdAt: string;
+}
+
+/**
+ * Notification Management
+ * GET /api/Notification
+ * POST /api/Notification/mark-as-read/{id}
+ */
+export const notificationService = {
+  /**
+   * Get all notifications for the current user
+   * GET /api/Notification
+   */
+  async getAll(): Promise<ApiResponse<BackendNotification[]>> {
+    try {
+      const res = await apiCall<BackendNotification[]>("/api/Notification", {
+        method: "GET",
+      });
+      return { data: res.data || [], success: true };
+    } catch (error) {
+      console.error("[notificationService.getAll] Error:", error);
+      return { data: [], success: false };
+    }
+  },
+
+  /**
+   * Mark a notification as read
+   * POST /api/Notification/mark-as-read/{id}
+   */
+  async markAsRead(id: number): Promise<ApiResponse<void>> {
+    try {
+      await apiCall<void>(`/api/Notification/mark-as-read/${id}`, {
+        method: "POST",
+      });
+      return { data: undefined, success: true };
+    } catch (error) {
+      console.error("[notificationService.markAsRead] Error:", error);
+      return { data: undefined, success: false };
+    }
+  },
+};
+
+// ============================================================
+// DOCTOR SCHEDULE SERVICE
+// ============================================================
+
+export interface DoctorSchedule {
+  id?: number;
+  doctorId: number;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  slotDurationMinutes: number;
+}
+
+/**
+ * Doctor Schedule Management
+ * GET /api/DoctorSchedule/{doctorId}
+ * GET /api/DoctorSchedule/{doctorId}/available-slots?date=...
+ * POST /api/DoctorSchedule
+ */
+export const doctorScheduleService = {
+  /**
+   * Get a doctor's weekly schedule
+   * GET /api/DoctorSchedule/{doctorId}
+   */
+  async getSchedule(doctorId: string): Promise<ApiResponse<DoctorSchedule[]>> {
+    try {
+      const res = await apiCall<DoctorSchedule[]>(
+        `/api/DoctorSchedule/${doctorId}`,
+        { method: "GET" },
+      );
+      return { data: res.data || [], success: true };
+    } catch (error) {
+      console.error("[doctorScheduleService.getSchedule] Error:", error);
+      return { data: [], success: false };
+    }
+  },
+
+  /**
+   * Get available time slots for a doctor on a given date
+   * GET /api/DoctorSchedule/{doctorId}/available-slots?date=YYYY-MM-DDTHH:mm:ss
+   */
+  async getAvailableSlots(
+    doctorId: string,
+    date: string,
+  ): Promise<ApiResponse<string[]>> {
+    try {
+      // Convert plain date string "YYYY-MM-DD" to ISO datetime if needed
+      const isoDate = date.includes("T") ? date : `${date}T00:00:00`;
+      const res = await apiCall<string[]>(
+        `/api/DoctorSchedule/${doctorId}/available-slots?date=${encodeURIComponent(isoDate)}`,
+        { method: "GET" },
+      );
+      return { data: res.data || [], success: true };
+    } catch (error) {
+      console.error("[doctorScheduleService.getAvailableSlots] Error:", error);
+      return { data: [], success: false };
+    }
+  },
+
+  /**
+   * Create a new schedule entry for a doctor (admin feature)
+   * POST /api/DoctorSchedule
+   */
+  async create(data: DoctorSchedule): Promise<ApiResponse<DoctorSchedule>> {
+    try {
+      const res = await apiCall<DoctorSchedule>("/api/DoctorSchedule", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      return {
+        data: res.data,
+        success: true,
+        message: "Schedule created successfully",
+      };
+    } catch (error) {
+      console.error("[doctorScheduleService.create] Error:", error);
+      return { data: {} as DoctorSchedule, success: false };
     }
   },
 };

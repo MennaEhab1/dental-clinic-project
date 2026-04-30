@@ -21,6 +21,7 @@ import {
   doctorService,
   serviceService,
   appointmentService,
+  doctorScheduleService,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Doctor, Service } from "@/types";
@@ -35,7 +36,7 @@ const steps: { id: Step; label: string; icon: React.ElementType }[] = [
   { id: "confirm", label: "Confirm", icon: Check },
 ];
 
-const timeSlots = [
+const DEFAULT_TIME_SLOTS = [
   "09:00",
   "09:30",
   "10:00",
@@ -59,6 +60,9 @@ export default function BookingPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableSlots, setAvailableSlots] =
+    useState<string[]>(DEFAULT_TIME_SLOTS);
+  const [isFetchingSlots, setIsFetchingSlots] = useState(false);
 
   const [booking, setBooking] = useState({
     serviceId: searchParams.get("service") || "",
@@ -175,6 +179,35 @@ export default function BookingPage() {
         return d.specialty === svc.specialty;
       })
     : doctors;
+
+  // Fetch real available slots when doctor or date changes
+  useEffect(() => {
+    if (!booking.doctorId || !booking.date) {
+      setAvailableSlots(DEFAULT_TIME_SLOTS);
+      return;
+    }
+    let cancelled = false;
+    setIsFetchingSlots(true);
+    doctorScheduleService
+      .getAvailableSlots(booking.doctorId, booking.date)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.success && res.data && res.data.length > 0) {
+          setAvailableSlots(res.data);
+        } else {
+          setAvailableSlots(DEFAULT_TIME_SLOTS);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSlots(DEFAULT_TIME_SLOTS);
+      })
+      .finally(() => {
+        if (!cancelled) setIsFetchingSlots(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [booking.doctorId, booking.date]);
 
   // Debug: Log filtering
   useEffect(() => {
@@ -524,24 +557,37 @@ export default function BookingPage() {
                           Select Time
                         </Label>
                         <div className="grid grid-cols-3 gap-2 mt-2">
-                          {timeSlots.map((slot) => (
-                            <Button
-                              key={slot}
-                              variant={
-                                booking.time === slot ? "default" : "outline"
-                              }
-                              className={
-                                booking.time === slot
-                                  ? "gradient-bg border-0"
-                                  : ""
-                              }
-                              onClick={() =>
-                                setBooking((prev) => ({ ...prev, time: slot }))
-                              }
-                            >
-                              {slot}
-                            </Button>
-                          ))}
+                          {isFetchingSlots ? (
+                            <div className="col-span-3 text-sm text-muted-foreground py-2">
+                              Loading available slots...
+                            </div>
+                          ) : availableSlots.length === 0 ? (
+                            <div className="col-span-3 text-sm text-muted-foreground py-2">
+                              No available slots for this date.
+                            </div>
+                          ) : (
+                            availableSlots.map((slot) => (
+                              <Button
+                                key={slot}
+                                variant={
+                                  booking.time === slot ? "default" : "outline"
+                                }
+                                className={
+                                  booking.time === slot
+                                    ? "gradient-bg border-0"
+                                    : ""
+                                }
+                                onClick={() =>
+                                  setBooking((prev) => ({
+                                    ...prev,
+                                    time: slot,
+                                  }))
+                                }
+                              >
+                                {slot}
+                              </Button>
+                            ))
+                          )}
                         </div>
                       </div>
                     </div>

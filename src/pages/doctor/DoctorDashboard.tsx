@@ -17,7 +17,7 @@ import {
   Bell,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { doctorService } from "@/services/api";
+import { doctorService, notificationService } from "@/services/api";
 import type {
   Appointment,
   DashboardStats,
@@ -39,10 +39,13 @@ export default function DoctorDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [appointmentsRes, statsRes] = await Promise.all([
-          doctorService.getAppointments(),
-          doctorService.getDashboard(),
-        ]);
+        const [appointmentsRes, statsRes, notificationsRes] = await Promise.all(
+          [
+            doctorService.getAppointments(),
+            doctorService.getDashboard(),
+            notificationService.getAll(),
+          ],
+        );
 
         setAppointments(appointmentsRes.data);
         setStats(statsRes.data);
@@ -58,22 +61,36 @@ export default function DoctorDashboard() {
 
         setRecentPatients(byAppointment);
 
-        const notifications: Notification[] = appointmentsRes.data
-          .slice(0, 4)
-          .map((appointment) => ({
-            id: `notification-${appointment.id}`,
-            userId: user?.id || "doctor-local",
-            title: `Appointment ${appointment.status}`,
-            message:
-              `${appointment.patient?.firstName || "Patient"} ${appointment.patient?.lastName || ""} • ${appointment.date} ${appointment.time}`.trim(),
-            type: "appointment",
-            isRead:
-              appointment.status === "complete" ||
-              appointment.status === "cancelled",
-            createdAt: appointment.updatedAt || appointment.createdAt,
-          }));
-
-        setDoctorNotifications(notifications);
+        // Use real notifications from backend; fall back to appointment-derived ones
+        if (notificationsRes.success && notificationsRes.data.length > 0) {
+          const backendNotifications: Notification[] =
+            notificationsRes.data.map((n) => ({
+              id: String(n.id),
+              userId: user?.id || "",
+              title: n.message,
+              message: n.message,
+              type: "appointment" as const,
+              isRead: n.isRead,
+              createdAt: n.createdAt,
+            }));
+          setDoctorNotifications(backendNotifications);
+        } else {
+          const notifications: Notification[] = appointmentsRes.data
+            .slice(0, 4)
+            .map((appointment) => ({
+              id: `notification-${appointment.id}`,
+              userId: user?.id || "doctor-local",
+              title: `Appointment ${appointment.status}`,
+              message:
+                `${appointment.patient?.firstName || "Patient"} ${appointment.patient?.lastName || ""} • ${appointment.date} ${appointment.time}`.trim(),
+              type: "appointment" as const,
+              isRead:
+                appointment.status === "complete" ||
+                appointment.status === "cancelled",
+              createdAt: appointment.updatedAt || appointment.createdAt,
+            }));
+          setDoctorNotifications(notifications);
+        }
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {

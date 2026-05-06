@@ -30,12 +30,14 @@ import {
   FileText,
   ChevronRight,
   Filter,
-  Heart,
   Droplet,
   AlertTriangle,
+  Pill,
+  Loader2,
 } from "lucide-react";
 import type { Patient } from "@/types";
-import { doctorService } from "@/services/api";
+import type { PrescriptionDetailsDTO } from "@/types/swagger";
+import { doctorService, prescriptionService } from "@/services/api";
 
 export default function DoctorPatients() {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -44,6 +46,10 @@ export default function DoctorPatients() {
   const [genderFilter, setGenderFilter] = useState<string>("all");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [prescriptionsByPatient, setPrescriptionsByPatient] = useState<
+    Record<string, PrescriptionDetailsDTO[]>
+  >({});
+  const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
   const [recordsByPatient, setRecordsByPatient] = useState<
     Record<
       string,
@@ -71,6 +77,20 @@ export default function DoctorPatients() {
           );
 
         setPatients(uniquePatients);
+
+        // Pre-fetch prescriptions for all unique patients
+        const prescriptionsMap: Record<string, PrescriptionDetailsDTO[]> = {};
+        await Promise.allSettled(
+          uniquePatients.map(async (p) => {
+            try {
+              const res = await prescriptionService.getByPatient(p.id);
+              prescriptionsMap[p.id] = res.data || [];
+            } catch {
+              prescriptionsMap[p.id] = [];
+            }
+          }),
+        );
+        setPrescriptionsByPatient(prescriptionsMap);
 
         const mapped = appointmentsRes.data.reduce<
           Record<
@@ -119,6 +139,22 @@ export default function DoctorPatients() {
 
   const getPatientRecords = (patientId: string) => {
     return recordsByPatient[patientId] || [];
+  };
+
+  const loadPrescriptionsForPatient = async (patientId: string) => {
+    if (prescriptionsByPatient[patientId] !== undefined) return; // already loaded
+    setLoadingPrescriptions(true);
+    try {
+      const res = await prescriptionService.getByPatient(patientId);
+      setPrescriptionsByPatient((prev) => ({
+        ...prev,
+        [patientId]: res.data || [],
+      }));
+    } catch {
+      setPrescriptionsByPatient((prev) => ({ ...prev, [patientId]: [] }));
+    } finally {
+      setLoadingPrescriptions(false);
+    }
   };
 
   const calculateAge = (dob: string) => {
@@ -188,6 +224,7 @@ export default function DoctorPatients() {
                     onClick={() => {
                       setSelectedPatient(patient);
                       setProfileOpen(true);
+                      loadPrescriptionsForPatient(patient.id);
                     }}
                   >
                     <CardContent className="p-5">
@@ -358,11 +395,60 @@ export default function DoctorPatients() {
                   </div>
                 </div>
 
+                {/* Prescriptions Section */}
+                <div>
+                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                    <Pill className="w-3 h-3" /> Prescriptions
+                  </h4>
+                  {loadingPrescriptions ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                    </div>
+                  ) : (prescriptionsByPatient[selectedPatient.id] || [])
+                      .length > 0 ? (
+                    <div className="space-y-2">
+                      {(prescriptionsByPatient[selectedPatient.id] || []).map(
+                        (rx) => (
+                          <div
+                            key={rx.prescriptionId}
+                            className="p-3 rounded-lg border border-border text-sm"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="font-medium text-foreground text-xs">
+                                Rx #{rx.prescriptionId}
+                              </p>
+                              <span className="text-[10px] text-muted-foreground">
+                                {new Date(rx.date).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <ul className="space-y-0.5">
+                              {(rx.medicines || []).map((med, i) => (
+                                <li
+                                  key={i}
+                                  className="text-xs text-muted-foreground"
+                                >
+                                  • {med.medicineName}{" "}
+                                  {med.dosage ? `— ${med.dosage}` : ""}{" "}
+                                  {med.frequency ? `(${med.frequency})` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No prescriptions found
+                    </p>
+                  )}
+                </div>
+
                 <Button
                   className="w-full gradient-bg border-0"
                   onClick={() => setProfileOpen(false)}
                 >
-                  <FileText className="w-4 h-4 mr-2" /> View Full Record
+                  <FileText className="w-4 h-4 mr-2" /> Close
                 </Button>
               </div>
             )}

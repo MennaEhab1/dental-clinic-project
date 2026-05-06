@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Calendar,
+  Calendar as CalendarIcon,
   Clock,
   User,
   ArrowLeft,
@@ -16,6 +16,7 @@ import {
   Check,
   Stethoscope,
 } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
 import { toast } from "sonner";
 import {
   doctorService,
@@ -26,30 +27,66 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import type { Doctor, Service } from "@/types";
 
+const API_BASE =
+  import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
+
 type Step = "service" | "doctor" | "datetime" | "details" | "confirm";
 
 const steps: { id: Step; label: string; icon: React.ElementType }[] = [
   { id: "service", label: "Service", icon: Stethoscope },
   { id: "doctor", label: "Doctor", icon: User },
-  { id: "datetime", label: "Date & Time", icon: Calendar },
+  { id: "datetime", label: "Date & Time", icon: CalendarIcon },
   { id: "details", label: "Details", icon: User },
   { id: "confirm", label: "Confirm", icon: Check },
 ];
 
-const DEFAULT_TIME_SLOTS = [
-  "09:00",
-  "09:30",
-  "10:00",
-  "10:30",
-  "11:00",
-  "11:30",
-  "14:00",
-  "14:30",
-  "15:00",
-  "15:30",
-  "16:00",
-  "16:30",
-];
+const DAY_OF_WEEK_MAP: Record<string, number> = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
+
+type BookingDoctor = Doctor & {
+  name?: string;
+  photo?: string;
+  profileImage?: string;
+  imageUrl?: string;
+  profilePicture?: string;
+};
+
+function stripDoctorPrefix(value?: string | null): string {
+  return String(value || "")
+    .replace(/^\s*dr\.?\s+/i, "")
+    .trim();
+}
+
+function getDoctorDisplayName(doctor?: Doctor): string {
+  if (!doctor) return "Doctor";
+
+  const bookingDoctor = doctor as BookingDoctor;
+  const firstName = stripDoctorPrefix(bookingDoctor.firstName);
+  const lastName = stripDoctorPrefix(bookingDoctor.lastName);
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+  return fullName || stripDoctorPrefix(bookingDoctor.name) || "Doctor";
+}
+
+function getDoctorImageSrc(doctor?: Doctor): string | undefined {
+  if (!doctor) return undefined;
+
+  const bookingDoctor = doctor as BookingDoctor;
+  return (
+    bookingDoctor.avatar ||
+    bookingDoctor.profileImage ||
+    bookingDoctor.photo ||
+    bookingDoctor.imageUrl ||
+    bookingDoctor.profilePicture
+  );
+}
 
 export default function BookingPage() {
   const [searchParams] = useSearchParams();
@@ -60,9 +97,15 @@ export default function BookingPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isFetching, setIsFetching] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [availableSlots, setAvailableSlots] =
-    useState<string[]>(DEFAULT_TIME_SLOTS);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
   const [isFetchingSlots, setIsFetchingSlots] = useState(false);
+  const [doctorWorkingDays, setDoctorWorkingDays] = useState<Set<number>>(
+    new Set(),
+  );
+  const [isFetchingSchedule, setIsFetchingSchedule] = useState(false);
+  const [brokenDoctorImages, setBrokenDoctorImages] = useState<
+    Record<string, boolean>
+  >({});
 
   const [booking, setBooking] = useState({
     serviceId: searchParams.get("service") || "",
@@ -94,7 +137,7 @@ export default function BookingPage() {
           count: doctorsRes.data.length,
           doctors: doctorsRes.data.map((d) => ({
             id: d.id,
-            name: d.name,
+            name: getDoctorDisplayName(d),
             specialty: d.specialty,
             firstName: d.firstName,
             lastName: d.lastName,
@@ -180,30 +223,78 @@ export default function BookingPage() {
       })
     : doctors;
 
+  // Fetch doctor's weekly schedule to know which days they work
+  useEffect(() => {
+    if (!booking.doctorId) {
+      setDoctorWorkingDays(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    setIsFetchingSchedule(true);
+    setDoctorWorkingDays(new Set());
+
+    const run = async () => {
+      try {
+        const res = await doctorScheduleService.getSchedule(booking.doctorId);
+        if (!cancelled) {
+          const days = new Set(
+            res.data
+              .map((s) => DAY_OF_WEEK_MAP[s.dayOfWeek] ?? -1)
+              .filter((n) => n >= 0),
+          );
+          setDoctorWorkingDays(days);
+        }
+      } catch (err) {
+        console.error("❌ Schedule fetch error:", err);
+      } finally {
+        setIsFetchingSchedule(false);
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking.doctorId]);
+
   // Fetch real available slots when doctor or date changes
   useEffect(() => {
     if (!booking.doctorId || !booking.date) {
-      setAvailableSlots(DEFAULT_TIME_SLOTS);
+      setAvailableSlots([]);
       return;
     }
+
     let cancelled = false;
     setIsFetchingSlots(true);
-    doctorScheduleService
-      .getAvailableSlots(booking.doctorId, booking.date)
-      .then((res) => {
-        if (cancelled) return;
-        if (res.success && res.data && res.data.length > 0) {
-          setAvailableSlots(res.data);
-        } else {
-          setAvailableSlots(DEFAULT_TIME_SLOTS);
+    setAvailableSlots([]);
+
+    const run = async () => {
+      try {
+        const res = await doctorScheduleService.getAvailableSlots(
+          booking.doctorId,
+          booking.date,
+        );
+        if (!cancelled) {
+          // Filter out slots previously confirmed as booked (localStorage cache)
+          const takenKey = `booked_slots_${booking.doctorId}_${booking.date}`;
+          let taken: string[] = [];
+          try {
+            taken = JSON.parse(localStorage.getItem(takenKey) || "[]");
+          } catch {
+            /* ignore */
+          }
+          const slots = (res.data ?? []).filter((s) => !taken.includes(s));
+          setAvailableSlots(slots);
         }
-      })
-      .catch(() => {
-        if (!cancelled) setAvailableSlots(DEFAULT_TIME_SLOTS);
-      })
-      .finally(() => {
-        if (!cancelled) setIsFetchingSlots(false);
-      });
+      } catch (err) {
+        console.error("❌ Slots fetch error:", err);
+      } finally {
+        setIsFetchingSlots(false);
+      }
+    };
+
+    run();
     return () => {
       cancelled = true;
     };
@@ -225,7 +316,7 @@ export default function BookingPage() {
         filteredDoctorsCount: filteredDoctors.length,
         filteredDoctors: filteredDoctors.map((d) => ({
           id: d.id,
-          name: d.name,
+          name: getDoctorDisplayName(d),
           specialty: d.specialty,
         })),
       });
@@ -290,22 +381,53 @@ export default function BookingPage() {
             console.debug(
               "[BookingPage] ✅ Set appointments_refresh flag in localStorage",
             );
-          } catch (e) {}
+          } catch (_e) {
+            /* storage unavailable */
+          }
           // dispatch an in-tab event so mounted appointment views refresh immediately
           try {
             window.dispatchEvent(new Event("appointments:refresh"));
             console.debug(
               "[BookingPage] 📢 Dispatched appointments:refresh event after delay",
             );
-          } catch (e) {}
+          } catch (_e) {
+            /* event dispatch unavailable */
+          }
         }, 1000); // 1 second delay to ensure backend persistence
-      } catch (e) {}
+      } catch (_e) {
+        /* outer catch */
+      }
       toast.success("Appointment booked successfully!");
       navigate("/booking/confirmation", { state: { booked: resp.data } });
     } catch (error) {
       console.error("Booking error:", error);
       const msg = error instanceof Error ? error.message : String(error);
-      toast.error(`Failed to book appointment: ${msg}`);
+      if (msg.toLowerCase().includes("already booked")) {
+        // Persist the taken slot to localStorage so it is hidden on next load
+        const takenKey = `booked_slots_${booking.doctorId}_${booking.date}`;
+        try {
+          const existing: string[] = JSON.parse(
+            localStorage.getItem(takenKey) || "[]",
+          );
+          if (!existing.includes(booking.time)) {
+            localStorage.setItem(
+              takenKey,
+              JSON.stringify([...existing, booking.time]),
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+        // Remove from current list and send user back to pick another time
+        setAvailableSlots((prev) => prev.filter((s) => s !== booking.time));
+        setBooking((prev) => ({ ...prev, time: "" }));
+        setCurrentStep("datetime");
+        toast.error(
+          "That time slot is already booked. Please choose another time.",
+        );
+      } else {
+        toast.error(`Failed to book appointment: ${msg}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -494,11 +616,18 @@ export default function BookingPage() {
                         >
                           <CardContent className="p-4">
                             <div className="flex gap-4">
-                              {doctor.avatar ? (
+                              {getDoctorImageSrc(doctor) &&
+                              !brokenDoctorImages[doctor.id] ? (
                                 <img
-                                  src={doctor.avatar}
-                                  alt={`Dr. ${doctor.firstName} ${doctor.lastName}`}
+                                  src={getDoctorImageSrc(doctor)}
+                                  alt={`Dr. ${getDoctorDisplayName(doctor)}`}
                                   className="w-16 h-16 rounded-xl object-cover"
+                                  onError={() =>
+                                    setBrokenDoctorImages((prev) => ({
+                                      ...prev,
+                                      [doctor.id]: true,
+                                    }))
+                                  }
                                 />
                               ) : (
                                 <div className="w-16 h-16 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
@@ -507,7 +636,7 @@ export default function BookingPage() {
                               )}
                               <div className="flex-1">
                                 <h3 className="font-semibold text-foreground">
-                                  Dr. {doctor.firstName} {doctor.lastName}
+                                  Dr. {getDoctorDisplayName(doctor)}
                                 </h3>
                                 <p className="text-sm text-muted-foreground capitalize">
                                   {doctor.specialty.replace("-", " ")}
@@ -534,25 +663,57 @@ export default function BookingPage() {
               {currentStep === "datetime" && (
                 <Card>
                   <CardContent className="p-6">
-                    <div className="grid md:grid-cols-2 gap-6">
+                    <div className="flex flex-col md:flex-row gap-6">
                       <div>
                         <Label className="text-base font-medium">
                           Select Date
                         </Label>
-                        <Input
-                          type="date"
-                          value={booking.date}
-                          onChange={(e) =>
-                            setBooking((prev) => ({
-                              ...prev,
-                              date: e.target.value,
-                            }))
-                          }
-                          min={new Date().toISOString().split("T")[0]}
-                          className="mt-2"
-                        />
+                        {isFetchingSchedule ? (
+                          <p className="text-sm text-muted-foreground mt-3">
+                            Loading doctor schedule...
+                          </p>
+                        ) : (
+                          <Calendar
+                            mode="single"
+                            selected={
+                              booking.date
+                                ? new Date(booking.date + "T00:00:00")
+                                : undefined
+                            }
+                            onSelect={(day) => {
+                              if (day) {
+                                const y = day.getFullYear();
+                                const m = String(day.getMonth() + 1).padStart(
+                                  2,
+                                  "0",
+                                );
+                                const d = String(day.getDate()).padStart(
+                                  2,
+                                  "0",
+                                );
+                                setBooking((prev) => ({
+                                  ...prev,
+                                  date: `${y}-${m}-${d}`,
+                                  time: "",
+                                }));
+                              }
+                            }}
+                            disabled={(day) => {
+                              const today = new Date();
+                              today.setHours(0, 0, 0, 0);
+                              if (day < today) return true;
+                              if (
+                                doctorWorkingDays.size > 0 &&
+                                !doctorWorkingDays.has(day.getDay())
+                              )
+                                return true;
+                              return false;
+                            }}
+                            className="rounded-md border mt-2"
+                          />
+                        )}
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <Label className="text-base font-medium">
                           Select Time
                         </Label>
@@ -561,9 +722,14 @@ export default function BookingPage() {
                             <div className="col-span-3 text-sm text-muted-foreground py-2">
                               Loading available slots...
                             </div>
+                          ) : !booking.date ? (
+                            <div className="col-span-3 text-sm text-muted-foreground py-2">
+                              Please select a date first.
+                            </div>
                           ) : availableSlots.length === 0 ? (
                             <div className="col-span-3 text-sm text-muted-foreground py-2">
-                              No available slots for this date.
+                              No available slots for this date. Please select
+                              another date.
                             </div>
                           ) : (
                             availableSlots.map((slot) => (
@@ -702,8 +868,7 @@ export default function BookingPage() {
                       <div className="flex justify-between py-3 border-b border-border">
                         <span className="text-muted-foreground">Doctor</span>
                         <span className="font-medium text-foreground">
-                          Dr. {selectedDoctor?.firstName}{" "}
-                          {selectedDoctor?.lastName}
+                          Dr. {getDoctorDisplayName(selectedDoctor)}
                         </span>
                       </div>
                       <div className="flex justify-between py-3 border-b border-border">

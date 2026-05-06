@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -23,25 +24,38 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Search, Plus, Edit, Trash2, Star, Filter } from "lucide-react";
-import { adminDoctorService } from "@/services/api";
+import {
+  Search,
+  Plus,
+  Edit,
+  Trash2,
+  Star,
+  Filter,
+  ToggleLeft,
+  ToggleRight,
+} from "lucide-react";
+import { adminDoctorService, specializationService } from "@/services/api";
 import type { Doctor } from "@/types";
 import { toast } from "@/hooks/use-toast";
 
 interface DoctorFormData {
-  firstName: string;
-  lastName: string;
+  fullName: string;
   email: string;
   password?: string;
   phone?: string;
-  specialty: string;
+  specialityID: number;
   experience?: number;
   consultationFee?: number;
   bio?: string;
+  gender: string;
+  address: string;
 }
 
 export default function AdminDoctors() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [specializations, setSpecializations] = useState<
+    { id: number; name: string }[]
+  >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -49,20 +63,42 @@ export default function AdminDoctors() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [formData, setFormData] = useState<DoctorFormData>({
-    firstName: "",
-    lastName: "",
+    fullName: "",
     email: "",
     phone: "",
-    specialty: "general",
+    specialityID: 0,
     experience: 0,
     consultationFee: 0,
     bio: "",
+    gender: "",
+    address: "",
   });
 
   // Fetch doctors on mount
   useEffect(() => {
     fetchDoctors();
+    fetchSpecializations();
   }, []);
+
+  const fetchSpecializations = async () => {
+    try {
+      const res = await specializationService.getAll();
+      const items = (res.data || []).map((s: { id: number; name: string }) => ({
+        id: s.id,
+        name: s.name,
+      }));
+      setSpecializations(items);
+      // Set default specialityID to first item if not yet set
+      if (items.length > 0) {
+        setFormData((prev) => ({
+          ...prev,
+          specialityID: prev.specialityID || items[0].id,
+        }));
+      }
+    } catch {
+      // non-critical — dropdown will show fallback
+    }
+  };
 
   const fetchDoctors = async () => {
     try {
@@ -86,36 +122,56 @@ export default function AdminDoctors() {
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
     const matchesSpecialty =
-      specialtyFilter === "all" || d.specialty === specialtyFilter;
+      specialtyFilter === "all" ||
+      String(d.specialty).toLowerCase() === specialtyFilter.toLowerCase();
     return matchesSearch && matchesSpecialty;
   });
 
   const handleOpenDialog = (doctor?: Doctor) => {
+    const defaultId = specializations[0]?.id ?? 0;
+    // Warn if specializations haven't loaded yet (prevents specialityID: 0 being sent)
+    if (specializations.length === 0) {
+      toast({
+        title: "Please wait",
+        description:
+          "Specializations are still loading. Try again in a moment.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (doctor) {
+      // Find the matching specialization ID by name
+      const matchedSpec = specializations.find(
+        (s) =>
+          s.name.toLowerCase().replace(/\s+/g, "") ===
+          String(doctor.specialty).toLowerCase().replace(/[-\s]/g, ""),
+      );
       setEditingDoctor(doctor);
       setFormData({
-        firstName: doctor.firstName,
-        lastName: doctor.lastName,
+        fullName: `${doctor.firstName} ${doctor.lastName}`.trim(),
         email: doctor.email,
         password: "",
         phone: doctor.phone || "",
-        specialty: doctor.specialty,
+        specialityID: matchedSpec?.id ?? defaultId,
         experience: doctor.experience || 0,
         consultationFee: doctor.consultationFee || 0,
         bio: doctor.bio || "",
+        gender: (doctor as Doctor & { gender?: string }).gender || "",
+        address: (doctor as Doctor & { address?: string }).address || "",
       });
     } else {
       setEditingDoctor(null);
       setFormData({
-        firstName: "",
-        lastName: "",
+        fullName: "",
         email: "",
         password: "",
         phone: "",
-        specialty: "general",
+        specialityID: defaultId,
         experience: 0,
         consultationFee: 0,
         bio: "",
+        gender: "",
+        address: "",
       });
     }
     setDialogOpen(true);
@@ -127,10 +183,22 @@ export default function AdminDoctors() {
   };
 
   const handleSaveDoctor = async () => {
-    if (!formData.firstName || !formData.lastName || !formData.email) {
+    if (!formData.fullName.trim() || !formData.email) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!formData.specialityID || formData.specialityID <= 0) {
+      toast({
+        title: "Error",
+        description:
+          specializations.length === 0
+            ? "Specializations are still loading, please wait a moment and try again"
+            : "Please select a specialty",
         variant: "destructive",
       });
       return;
@@ -145,21 +213,81 @@ export default function AdminDoctors() {
       return;
     }
 
+    // Validate password meets ASP.NET Identity defaults to avoid backend 500
+    if (!editingDoctor && formData.password) {
+      const pwd = formData.password;
+      const missing: string[] = [];
+      if (pwd.length < 8) missing.push("at least 8 characters");
+      if (!/[A-Z]/.test(pwd)) missing.push("an uppercase letter");
+      if (!/[a-z]/.test(pwd)) missing.push("a lowercase letter");
+      if (!/[0-9]/.test(pwd)) missing.push("a number");
+      if (!/[^A-Za-z0-9]/.test(pwd))
+        missing.push("a special character (e.g. !@#$%)");
+      if (missing.length > 0) {
+        toast({
+          title: "Weak Password",
+          description: `Password must contain: ${missing.join(", ")}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    const password = (formData.password ?? "").trim();
+    if (!editingDoctor && !password) {
+      // Redundant safety check — should have been caught above, but guard here too
+      toast({
+        title: "Error",
+        description: "Password is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const createPayload = {
+      fullName: formData.fullName.trim(),
+      email: formData.email.trim(),
+      password,
+      salary: Math.max(0, Number(formData.consultationFee ?? 0)),
+      workingHours: Math.max(0, Number(formData.experience ?? 0)),
+      hiringDate: new Date().toISOString(),
+      specialityID: formData.specialityID,
+      gender: formData.gender,
+      address: formData.address.trim(),
+    };
+    const serviceData = createPayload;
+
     try {
       setIsSubmitting(true);
       if (editingDoctor) {
         // Update existing doctor
         const response = await adminDoctorService.update(
           editingDoctor.id,
-          formData,
+          serviceData,
         );
         if (!response.success) {
           throw new Error(response.message || "Failed to update doctor");
         }
+        // Optimistically update local state so the new name/values show immediately
+        const nameParts = formData.fullName.trim().split(/\s+/);
+        setDoctors((prev) =>
+          prev.map((d) =>
+            d.id === editingDoctor.id
+              ? {
+                  ...d,
+                  firstName: nameParts[0] || d.firstName,
+                  lastName: nameParts.slice(1).join(" ") || d.lastName,
+                  consultationFee:
+                    formData.consultationFee ?? d.consultationFee,
+                  experience: formData.experience ?? d.experience,
+                }
+              : d,
+          ),
+        );
         toast({ title: "Success", description: "Doctor updated successfully" });
       } else {
         // Create new doctor
-        const response = await adminDoctorService.create(formData);
+        const response = await adminDoctorService.create(serviceData);
         if (!response.success) {
           throw new Error(response.message || "Failed to create doctor");
         }
@@ -198,6 +326,31 @@ export default function AdminDoctors() {
     }
   };
 
+  const handleToggleStatus = async (doctor: Doctor) => {
+    try {
+      await adminDoctorService.toggleStatus(doctor.id);
+      setDoctors((prev) =>
+        prev.map((d) =>
+          d.id === doctor.id ? { ...d, isActive: !(d.isActive ?? true) } : d,
+        ),
+      );
+      const newStatus = !(doctor.isActive ?? true)
+        ? "activated"
+        : "deactivated";
+      toast({
+        title: "Success",
+        description: `Doctor ${newStatus} successfully`,
+      });
+    } catch (error) {
+      console.error("Failed to toggle doctor status:", error);
+      toast({
+        title: "Error",
+        description: "Failed to update doctor status",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <DashboardLayout role="admin">
       <div className="space-y-6">
@@ -228,29 +381,22 @@ export default function AdminDoctors() {
                 <DialogTitle className="font-display">
                   {editingDoctor ? "Edit Doctor" : "Add New Doctor"}
                 </DialogTitle>
+                <DialogDescription>
+                  {editingDoctor
+                    ? "Update the doctor's information below."
+                    : "Fill in the details to add a new doctor."}
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>First Name *</Label>
-                    <Input
-                      placeholder="First name"
-                      value={formData.firstName}
-                      onChange={(e) =>
-                        setFormData({ ...formData, firstName: e.target.value })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Last Name *</Label>
-                    <Input
-                      placeholder="Last name"
-                      value={formData.lastName}
-                      onChange={(e) =>
-                        setFormData({ ...formData, lastName: e.target.value })
-                      }
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label>Full Name *</Label>
+                  <Input
+                    placeholder="Dr. John Smith"
+                    value={formData.fullName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fullName: e.target.value })
+                    }
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Email *</Label>
@@ -268,12 +414,16 @@ export default function AdminDoctors() {
                     <Label>Password *</Label>
                     <Input
                       type="password"
-                      placeholder="Set initial password"
+                      placeholder="Min 8 chars, A-Z, a-z, 0-9, !@#$%"
                       value={formData.password || ""}
                       onChange={(e) =>
                         setFormData({ ...formData, password: e.target.value })
                       }
                     />
+                    <p className="text-xs text-muted-foreground">
+                      Must include uppercase, lowercase, number, and special
+                      character
+                    </p>
                   </div>
                 )}
                 <div className="space-y-2">
@@ -289,27 +439,18 @@ export default function AdminDoctors() {
                 <div className="space-y-2">
                   <Label>Specialty</Label>
                   <Select
-                    value={formData.specialty}
-                    onValueChange={(specialty) =>
-                      setFormData({ ...formData, specialty })
+                    value={String(formData.specialityID)}
+                    onValueChange={(val) =>
+                      setFormData({ ...formData, specialityID: Number(val) })
                     }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select specialty" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[
-                        "general",
-                        "orthodontics",
-                        "cosmetic",
-                        "oral-surgery",
-                        "pediatric",
-                        "endodontics",
-                        "periodontics",
-                        "prosthodontics",
-                      ].map((s) => (
-                        <SelectItem key={s} value={s} className="capitalize">
-                          {s.replace("-", " ")}
+                      {specializations.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -341,6 +482,35 @@ export default function AdminDoctors() {
                           ...formData,
                           consultationFee: parseInt(e.target.value) || 0,
                         })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Gender *</Label>
+                    <Select
+                      value={formData.gender}
+                      onValueChange={(val) =>
+                        setFormData({ ...formData, gender: val })
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select gender" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Male">Male</SelectItem>
+                        <SelectItem value="Female">Female</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Address *</Label>
+                    <Input
+                      placeholder="123 Main St"
+                      value={formData.address}
+                      onChange={(e) =>
+                        setFormData({ ...formData, address: e.target.value })
                       }
                     />
                   </div>
@@ -394,18 +564,9 @@ export default function AdminDoctors() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Specialties</SelectItem>
-              {[
-                "general",
-                "orthodontics",
-                "cosmetic",
-                "oral-surgery",
-                "pediatric",
-                "endodontics",
-                "periodontics",
-                "prosthodontics",
-              ].map((s) => (
-                <SelectItem key={s} value={s} className="capitalize">
-                  {s.replace("-", " ")}
+              {specializations.map((s) => (
+                <SelectItem key={s.id} value={s.name.toLowerCase()}>
+                  {s.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -433,23 +594,62 @@ export default function AdminDoctors() {
                   <CardContent className="p-5">
                     <div className="flex items-start gap-4">
                       <Avatar className="h-14 w-14">
-                        <AvatarImage src={doctor.profileImage} />
+                        <AvatarImage src={doctor.avatar} />
                         <AvatarFallback>
-                          {doctor.firstName[0]}
-                          {doctor.lastName[0]}
+                          {(
+                            doctor.firstName?.[0] ??
+                            doctor.email?.[0] ??
+                            "D"
+                          ).toUpperCase()}
+                          {(doctor.lastName?.[0] ?? "").toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between">
                           <div>
-                            <p className="font-semibold text-foreground">
-                              Dr. {doctor.firstName} {doctor.lastName}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-foreground">
+                                Dr. {doctor.firstName} {doctor.lastName}
+                              </p>
+                              <Badge
+                                variant={
+                                  doctor.isActive !== false
+                                    ? "default"
+                                    : "secondary"
+                                }
+                                className={`text-[10px] px-1.5 py-0 ${
+                                  doctor.isActive !== false
+                                    ? "bg-green-500/15 text-green-600 border-green-500/30"
+                                    : "bg-muted text-muted-foreground"
+                                }`}
+                              >
+                                {doctor.isActive !== false
+                                  ? "Active"
+                                  : "Inactive"}
+                              </Badge>
+                            </div>
                             <p className="text-xs text-muted-foreground capitalize">
                               {doctor.specialty.replace("-", " ")}
                             </p>
                           </div>
                           <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              title={
+                                doctor.isActive !== false
+                                  ? "Deactivate"
+                                  : "Activate"
+                              }
+                              onClick={() => handleToggleStatus(doctor)}
+                            >
+                              {doctor.isActive !== false ? (
+                                <ToggleRight className="w-4 h-4 text-green-500" />
+                              ) : (
+                                <ToggleLeft className="w-4 h-4 text-muted-foreground" />
+                              )}
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"

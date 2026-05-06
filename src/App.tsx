@@ -20,6 +20,7 @@ import DoctorsPage from "./pages/DoctorsPage";
 import LoginPage from "./pages/auth/LoginPage";
 import RegisterPage from "./pages/auth/RegisterPage";
 import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
+import ConfirmEmailPage from "./pages/auth/ConfirmEmailPage";
 import BookingPage from "./pages/booking/BookingPage";
 import BookingConfirmation from "./pages/booking/BookingConfirmation";
 import NotFound from "./pages/NotFound";
@@ -40,6 +41,7 @@ import DoctorAppointments from "./pages/doctor/DoctorAppointments";
 import DoctorPatients from "./pages/doctor/DoctorPatients";
 import DoctorMedicalRecords from "./pages/doctor/DoctorMedicalRecords";
 import DoctorMessages from "./pages/doctor/DoctorMessages";
+import DoctorSchedulePage from "./pages/doctor/DoctorSchedule";
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -113,6 +115,12 @@ const App = () => (
                 element={<ResetPasswordApiRedirect />}
               />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              {/* Confirm-email deep-link handler (from backend email links) */}
+              <Route path="/confirm-email" element={<ConfirmEmailPage />} />
+              <Route
+                path="/api/Account/confirm-email"
+                element={<ConfirmEmailPage />}
+              />
               <Route path="/booking" element={<BookingPage />} />
               <Route
                 path="/booking/confirmation"
@@ -258,6 +266,16 @@ const App = () => (
                   <ProtectedRoute>
                     <RoleRoute role="doctor">
                       <DoctorMessages />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/doctor/schedule"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <DoctorSchedulePage />
                     </RoleRoute>
                   </ProtectedRoute>
                 }

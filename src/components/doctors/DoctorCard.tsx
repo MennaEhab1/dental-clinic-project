@@ -1,40 +1,58 @@
-import { motion } from 'framer-motion';
-import { Star } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import type { Doctor } from '@/types';
-import { Link } from 'react-router-dom';
+import { motion } from "framer-motion";
+import { Star } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { Doctor } from "@/types";
+import { Link } from "react-router-dom";
 
 interface DoctorCardProps {
   doctor: Doctor;
-  variant?: 'default' | 'compact';
+  variant?: "default" | "compact";
 }
 
 const specialtyColors: Record<string, string> = {
-  general: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  orthodontics: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-  cosmetic: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400',
-  'oral-surgery': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  pediatric: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-  endodontics: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
-  periodontics: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
-  prosthodontics: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
+  general: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+  orthodontics:
+    "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  cosmetic: "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400",
+  "oral-surgery":
+    "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+  pediatric:
+    "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+  endodontics:
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
+  periodontics:
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
+  prosthodontics:
+    "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
 };
 
 const specialtyLabels: Record<string, string> = {
-  general: 'General Dentistry',
-  orthodontics: 'Orthodontics',
-  cosmetic: 'Cosmetic Dentistry',
-  'oral-surgery': 'Oral Surgery',
-  pediatric: 'Pediatric Dentistry',
-  endodontics: 'Endodontics',
-  periodontics: 'Periodontics',
-  prosthodontics: 'Prosthodontics',
+  general: "General Dentistry",
+  orthodontics: "Orthodontics",
+  cosmetic: "Cosmetic Dentistry",
+  "oral-surgery": "Oral Surgery",
+  pediatric: "Pediatric Dentistry",
+  endodontics: "Endodontics",
+  periodontics: "Periodontics",
+  prosthodontics: "Prosthodontics",
 };
 
-export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
-  if (variant === 'compact') {
+export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
+  const normalizedFirstName = (doctor.firstName || "")
+    .replace(/^\s*dr\.?\s+/i, "")
+    .trim();
+  const normalizedLastName = (doctor.lastName || "")
+    .replace(/^\s*dr\.?\s+/i, "")
+    .trim();
+  const fullName =
+    [normalizedFirstName, normalizedLastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim() || "Doctor";
+
+  if (variant === "compact") {
     return (
       <motion.div
         whileHover={{ y: -2 }}
@@ -42,14 +60,16 @@ export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
       >
         <img
           src={doctor.avatar}
-          alt={`Dr. ${doctor.firstName} ${doctor.lastName}`}
+          alt={`Dr. ${fullName}`}
           className="w-14 h-14 rounded-xl object-cover"
         />
         <div className="flex-1 min-w-0">
           <h4 className="font-medium text-foreground truncate">
-            Dr. {doctor.firstName} {doctor.lastName}
+            Dr. {fullName}
           </h4>
-          <p className="text-sm text-muted-foreground">{specialtyLabels[doctor.specialty]}</p>
+          <p className="text-sm text-muted-foreground">
+            {specialtyLabels[doctor.specialty]}
+          </p>
         </div>
         <div className="flex items-center gap-1">
           <Star className="w-4 h-4 text-warning fill-warning" />
@@ -60,15 +80,12 @@ export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
   }
 
   return (
-    <motion.div
-      whileHover={{ y: -4 }}
-      transition={{ duration: 0.2 }}
-    >
+    <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
       <Card className="overflow-hidden shadow-card hover:shadow-elevated transition-shadow">
         <div className="relative">
           <img
             src={doctor.avatar}
-            alt={`Dr. ${doctor.firstName} ${doctor.lastName}`}
+            alt={`Dr. ${fullName}`}
             className="w-full h-56 object-cover"
           />
           <div className="absolute top-3 right-3">
@@ -81,7 +98,7 @@ export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-display font-semibold text-lg text-foreground">
-                Dr. {doctor.firstName} {doctor.lastName}
+                Dr. {fullName}
               </h3>
               <p className="text-sm text-muted-foreground">
                 {doctor.experience} years experience
@@ -90,7 +107,9 @@ export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
             <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-lg">
               <Star className="w-4 h-4 text-warning fill-warning" />
               <span className="text-sm font-medium">{doctor.rating}</span>
-              <span className="text-xs text-muted-foreground">({doctor.reviewCount})</span>
+              <span className="text-xs text-muted-foreground">
+                ({doctor.reviewCount})
+              </span>
             </div>
           </div>
           <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
@@ -105,13 +124,15 @@ export function DoctorCard({ doctor, variant = 'default' }: DoctorCardProps) {
           </div>
           <div className="flex items-center justify-between pt-4 border-t border-border">
             <div>
-              <span className="text-xs text-muted-foreground">Consultation</span>
-              <p className="font-semibold text-primary">${doctor.consultationFee}</p>
+              <span className="text-xs text-muted-foreground">
+                Consultation
+              </span>
+              <p className="font-semibold text-primary">
+                ${doctor.consultationFee}
+              </p>
             </div>
             <Link to={`/booking?doctor=${doctor.id}`}>
-              <Button className="gradient-bg border-0">
-                Book Now
-              </Button>
+              <Button className="gradient-bg border-0">Book Now</Button>
             </Link>
           </div>
         </CardContent>

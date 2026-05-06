@@ -43,6 +43,20 @@ export interface ResetPasswordDTO {
   newPassword?: string | null;
 }
 
+export interface AuthResponseDTO {
+  token?: string | null;
+  refreshToken?: string | null;
+  expiration?: string | null; // date-time
+}
+
+export interface RefreshTokenRequestDTO {
+  refreshToken?: string | null;
+}
+
+export interface RevokeTokenDTO {
+  refreshToken?: string | null;
+}
+
 export interface PrescriptionMedicineDto {
   medicineId: number;
   dosage?: string | null;

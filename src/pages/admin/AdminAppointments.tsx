@@ -6,6 +6,7 @@ import { AppointmentDetailsDrawer } from "@/components/dashboard/AppointmentDeta
 import { LoadingCard } from "@/components/common/LoadingSpinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
@@ -14,10 +15,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Search, Filter, X, Check } from "lucide-react";
-import { adminAppointmentService } from "@/services/api";
-import type { Appointment, AppointmentStatus } from "@/types";
+import { Search, Filter, X, Check, Plus, Loader2 } from "lucide-react";
+import { adminAppointmentService, doctorService } from "@/services/api";
+import type { Appointment, AppointmentStatus, Doctor, Patient } from "@/types";
 import { toast } from "@/hooks/use-toast";
 
 export default function AdminAppointments() {
@@ -28,10 +36,31 @@ export default function AdminAppointments() {
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Create appointment dialog state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [isCreating, setIsCreating] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    doctorID: "",
+    patientID: "",
+    date: "",
+    startTime: "",
+    amount: "0",
+    paymentMethod: "Cash" as "Cash" | "Visa",
+  });
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     fetchAppointments();
+    // Load doctors from Lookup endpoint (proper names via DoctorDTO)
+    doctorService
+      .getAll()
+      .then((res) => setDoctors(res.data ?? []))
+      .catch(() => {});
   }, []);
 
   const fetchAppointments = async () => {
@@ -39,6 +68,23 @@ export default function AdminAppointments() {
       setIsLoading(true);
       const response = await adminAppointmentService.getAll();
       setAppointments(response.data);
+      // Derive unique patients from loaded appointments using the raw integer patientId
+      // (apt.patientId is the DB integer FK, not the ASP.NET Identity GUID)
+      const seen = new Set<string>();
+      const derived: Patient[] = [];
+      for (const apt of response.data) {
+        const numericId = apt.patientId; // raw integer string like "3", not a GUID
+        const isValidInteger =
+          numericId && !isNaN(Number(numericId)) && Number(numericId) > 0;
+        if (isValidInteger && !seen.has(numericId)) {
+          seen.add(numericId);
+          derived.push({
+            ...(apt.patient ?? {}),
+            id: numericId, // override with integer FK so Number(id) works
+          } as Patient);
+        }
+      }
+      setPatients(derived);
     } catch (error) {
       console.error("Failed to fetch appointments:", error);
       toast({
@@ -48,6 +94,23 @@ export default function AdminAppointments() {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Opens the drawer — calls GET /api/admin/appointments/{id} for fresh data
+  const openDetails = async (apt: Appointment) => {
+    setSelectedAppointment(apt); // show immediately with table data
+    setDrawerOpen(true);
+    setIsLoadingDetails(true);
+    try {
+      const res = await adminAppointmentService.getById(apt.id);
+      if (res.data?.id) {
+        setSelectedAppointment(res.data);
+      }
+    } catch {
+      // non-fatal — drawer already shows table data
+    } finally {
+      setIsLoadingDetails(false);
     }
   };
 
@@ -66,8 +129,7 @@ export default function AdminAppointments() {
   ) => {
     try {
       setIsUpdating(true);
-      const backendStatus = newStatus === "complete" ? "completed" : newStatus;
-      await adminAppointmentService.updateStatus(appointmentId, backendStatus);
+      await adminAppointmentService.updateStatus(appointmentId, newStatus);
       setAppointments((prev) =>
         prev.map((apt) =>
           apt.id === appointmentId ? { ...apt, status: newStatus } : apt,
@@ -84,6 +146,68 @@ export default function AdminAppointments() {
       });
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const validateCreateForm = () => {
+    const errs: Record<string, string> = {};
+    if (!createForm.doctorID) errs.doctorID = "Doctor is required";
+    if (!createForm.patientID) errs.patientID = "Patient is required";
+    if (!createForm.date) errs.date = "Date is required";
+    if (!createForm.startTime) errs.startTime = "Start time is required";
+    if (isNaN(Number(createForm.amount)) || Number(createForm.amount) < 0)
+      errs.amount = "Valid amount is required";
+    setCreateErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleCreateAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateCreateForm()) return;
+    setIsCreating(true);
+    try {
+      const doctorIDNum = Number(createForm.doctorID);
+      const patientIDNum = Number(createForm.patientID);
+      if (isNaN(doctorIDNum) || isNaN(patientIDNum)) {
+        throw new Error(
+          "Invalid doctor or patient ID — please re-select from the dropdowns",
+        );
+      }
+      // Use explicit UTC midnight to avoid local-timezone date shifts
+      const dateIso = `${createForm.date}T00:00:00Z`;
+      // input[type="time"] returns "HH:mm" — pad to "HH:mm:ss" for date-span
+      const [hh, mm] = createForm.startTime.split(":");
+      const startTime = `${hh.padStart(2, "0")}:${(mm ?? "00").padStart(2, "0")}:00`;
+      const response = await adminAppointmentService.create({
+        doctorID: doctorIDNum,
+        patientID: patientIDNum,
+        date: dateIso,
+        startTime,
+        amount: Math.round(Number(createForm.amount)), // backend expects integer
+        paymentMethod: createForm.paymentMethod,
+        paymentStatus: "Unpaid",
+      });
+      setAppointments((prev) => [response.data, ...prev]);
+      toast({
+        title: "Success",
+        description: "Appointment created successfully",
+      });
+      setCreateOpen(false);
+      setCreateForm({
+        doctorID: "",
+        patientID: "",
+        date: "",
+        startTime: "",
+        amount: "0",
+        paymentMethod: "Cash",
+      });
+      setCreateErrors({});
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : "Failed to create appointment";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -118,13 +242,23 @@ export default function AdminAppointments() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
+          className="flex items-start justify-between gap-4"
         >
-          <h1 className="font-display text-2xl font-bold text-foreground">
-            Appointments Monitoring
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            Overview of all appointments across the center
-          </p>
+          <div>
+            <h1 className="font-display text-2xl font-bold text-foreground">
+              Appointments Monitoring
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              Overview of all appointments across the center
+            </p>
+          </div>
+          <Button
+            className="gradient-bg border-0 gap-2 shrink-0"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="w-4 h-4" />
+            New Appointment
+          </Button>
         </motion.div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -206,7 +340,13 @@ export default function AdminAppointments() {
                         </div>
                       </td>
                       <td className="py-3 text-muted-foreground">
-                        Dr. {apt.doctor?.lastName}
+                        {apt.doctor
+                          ? `Dr. ${apt.doctor.firstName} ${apt.doctor.lastName}`
+                              .trim()
+                              .replace(/Dr\.\s*$/, "Dr. —")
+                          : apt.doctorId
+                            ? `Doctor #${apt.doctorId}`
+                            : "—"}
                       </td>
                       <td className="py-3 text-muted-foreground hidden md:table-cell">
                         {apt.service?.name}
@@ -222,11 +362,8 @@ export default function AdminAppointments() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setSelectedAppointment(apt);
-                              setDrawerOpen(true);
-                            }}
-                            disabled={isUpdating}
+                            onClick={() => openDetails(apt)}
+                            disabled={isUpdating || isLoadingDetails}
                           >
                             View Details
                           </Button>
@@ -279,6 +416,200 @@ export default function AdminAppointments() {
           />
         )}
       </div>
+
+      {/* Create Appointment Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Appointment</DialogTitle>
+            <DialogDescription>
+              Book an appointment on behalf of a patient.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateAppointment} className="space-y-4">
+            {/* Doctor */}
+            <div>
+              <Label htmlFor="ca-doctor">Doctor</Label>
+              <Select
+                value={createForm.doctorID}
+                onValueChange={(v) =>
+                  setCreateForm((p) => ({ ...p, doctorID: v }))
+                }
+              >
+                <SelectTrigger
+                  id="ca-doctor"
+                  className={`mt-1 ${createErrors.doctorID ? "border-destructive" : ""}`}
+                >
+                  <SelectValue placeholder="Select doctor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {doctors.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      Dr. {d.firstName} {d.lastName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {createErrors.doctorID && (
+                <p className="text-xs text-destructive mt-1">
+                  {createErrors.doctorID}
+                </p>
+              )}
+            </div>
+
+            {/* Patient */}
+            <div>
+              <Label htmlFor="ca-patient">Patient</Label>
+              {patients.length > 0 ? (
+                <Select
+                  value={createForm.patientID}
+                  onValueChange={(v) =>
+                    setCreateForm((p) => ({ ...p, patientID: v }))
+                  }
+                >
+                  <SelectTrigger
+                    id="ca-patient"
+                    className={`mt-1 ${createErrors.patientID ? "border-destructive" : ""}`}
+                  >
+                    <SelectValue placeholder="Select patient" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {patients.map((pt) => (
+                      <SelectItem key={pt.id} value={pt.id}>
+                        {pt.firstName} {pt.lastName}
+                        {pt.email ? ` — ${pt.email}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="ca-patient"
+                  type="number"
+                  min="1"
+                  placeholder="Enter patient ID"
+                  value={createForm.patientID}
+                  onChange={(e) =>
+                    setCreateForm((p) => ({ ...p, patientID: e.target.value }))
+                  }
+                  className={`mt-1 ${createErrors.patientID ? "border-destructive" : ""}`}
+                />
+              )}
+              {createErrors.patientID && (
+                <p className="text-xs text-destructive mt-1">
+                  {createErrors.patientID}
+                </p>
+              )}
+            </div>
+
+            {/* Date & Time */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ca-date">Date</Label>
+                <Input
+                  id="ca-date"
+                  type="date"
+                  value={createForm.date}
+                  onChange={(e) =>
+                    setCreateForm((p) => ({ ...p, date: e.target.value }))
+                  }
+                  className={`mt-1 ${createErrors.date ? "border-destructive" : ""}`}
+                />
+                {createErrors.date && (
+                  <p className="text-xs text-destructive mt-1">
+                    {createErrors.date}
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="ca-time">Start Time</Label>
+                <Input
+                  id="ca-time"
+                  type="time"
+                  value={createForm.startTime}
+                  onChange={(e) =>
+                    setCreateForm((p) => ({ ...p, startTime: e.target.value }))
+                  }
+                  className={`mt-1 ${createErrors.startTime ? "border-destructive" : ""}`}
+                />
+                {createErrors.startTime && (
+                  <p className="text-xs text-destructive mt-1">
+                    {createErrors.startTime}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Amount & Payment method */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ca-amount">Amount (EGP)</Label>
+                <Input
+                  id="ca-amount"
+                  type="number"
+                  min="0"
+                  value={createForm.amount}
+                  onChange={(e) =>
+                    setCreateForm((p) => ({ ...p, amount: e.target.value }))
+                  }
+                  className={`mt-1 ${createErrors.amount ? "border-destructive" : ""}`}
+                />
+                {createErrors.amount && (
+                  <p className="text-xs text-destructive mt-1">
+                    {createErrors.amount}
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label htmlFor="ca-payment">Payment</Label>
+                <Select
+                  value={createForm.paymentMethod}
+                  onValueChange={(v) =>
+                    setCreateForm((p) => ({
+                      ...p,
+                      paymentMethod: v as "Cash" | "Visa",
+                    }))
+                  }
+                >
+                  <SelectTrigger id="ca-payment" className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="Visa">Visa</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setCreateOpen(false)}
+                disabled={isCreating}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 gradient-bg border-0"
+                disabled={isCreating}
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  "Create Appointment"
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

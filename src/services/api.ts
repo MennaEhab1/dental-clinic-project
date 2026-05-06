@@ -38,11 +38,14 @@ import type {
   DentalSpecialty,
 } from "@/types";
 import type {
+  AuthResponseDTO,
   BookAppointmentDto,
   CreatePrescriptionDto,
   ForgotPasswordDTO,
   PrescriptionDetailsDTO,
+  RefreshTokenRequestDTO,
   ResetPasswordDTO,
+  RevokeTokenDTO,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -53,6 +56,11 @@ const DEBUG_API = import.meta.env.VITE_DEBUG_API === "true";
 
 // In-memory token storage (cleared on logout or page refresh)
 let authToken: string | null = null;
+// In-memory refresh token storage
+let authRefreshToken: string | null = null;
+// Prevent concurrent token-refresh races
+let isRefreshing = false;
+let refreshWaiters: Array<(token: string | null) => void> = [];
 
 function normalizeSpecialty(value?: string | null): DentalSpecialty {
   const normalized = (value || "").toLowerCase().trim();
@@ -147,6 +155,19 @@ function splitName(fullName?: string | null): {
     firstName: parts[0],
     lastName: parts.slice(1).join(" "),
   };
+}
+
+function stripDoctorTitle(value?: string | null): string {
+  return String(value || "")
+    .replace(/^\s*dr\.?\s+/i, "")
+    .trim();
+}
+
+function splitDoctorName(rawDoctorName?: string | null): {
+  firstName: string;
+  lastName: string;
+} {
+  return splitName(stripDoctorTitle(rawDoctorName));
 }
 
 function formatDateTimeInEgypt(date: Date): { date: string; time: string } {
@@ -331,6 +352,39 @@ function setAuthToken(token: string | null): void {
 }
 
 /**
+ * Store the refresh token in memory and localStorage
+ */
+function setRefreshToken(token: string | null): void {
+  authRefreshToken = token;
+  try {
+    if (token) {
+      localStorage.setItem("auth_refresh_token", token);
+    } else {
+      localStorage.removeItem("auth_refresh_token");
+    }
+  } catch (e) {
+    console.error("[setRefreshToken] localStorage error:", e);
+  }
+}
+
+/**
+ * Get the current refresh token
+ */
+function getRefreshToken(): string | null {
+  if (authRefreshToken) return authRefreshToken;
+  try {
+    const stored = localStorage.getItem("auth_refresh_token");
+    if (stored) {
+      authRefreshToken = stored;
+      return stored;
+    }
+  } catch (e) {
+    console.error("[getRefreshToken] localStorage error:", e);
+  }
+  return null;
+}
+
+/**
  * Extract patient ID from JWT token claims
  * Looks for common claim names: sub, userId, patientId, id, nameid
  */
@@ -341,6 +395,11 @@ function extractPatientIdFromToken(token: string | null): string | null {
   // Try common patient/user ID field names
   // Also check for Microsoft-standard claim URIs
   const patientId =
+    // Custom backend claims for the doctor's integer ID (most specific first)
+    (claims.DoctorId as string) ||
+    (claims.doctorId as string) ||
+    (claims.doctor_id as string) ||
+    (claims.PatientId as string) ||
     (claims.sub as string) ||
     (claims.userId as string) ||
     (claims.patientId as string) ||
@@ -378,9 +437,14 @@ async function apiCall<T>(
   const publicEndpoints = [
     "/api/Account/login",
     "/api/Account/register",
+    "/api/Account/confirm-email",
+    "/api/Account/forgot-password",
+    "/api/Account/reset-password",
+    "/api/Account/RefreshToken",
     "/swagger",
     "/api/Lookup/Doctors",
     "/api/Lookup/Specializations",
+    // NOTE: /api/DoctorSchedule is NOT public — it requires a valid JWT
   ];
   const isPublicEndpoint = publicEndpoints.some((publicPath) =>
     endpoint.includes(publicPath),
@@ -460,21 +524,28 @@ async function apiCall<T>(
   // Handle HTTP errors
   if (!response.ok) {
     const normalizedErrorText = String(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data && typeof data === "object"
-        ? (data as any).message || ""
+        ? (data as Record<string, unknown>).message || ""
         : data || "",
     )
       .toLowerCase()
       .trim();
+
+    // Auth failure - clear stored token only for auth-related endpoints.
+    // For resource endpoints (admin, doctor, patient pages), a 401 means
+    // "insufficient permissions" — do NOT log the user out.
+    const isAuthEndpoint =
+      endpoint.includes("/api/Account/") || endpoint.includes("/api/auth/");
+
+    // For non-auth endpoints, only treat HTTP 401 as unauthorized (not 403,
+    // which is a permission/role denial that should not force a logout).
     const isUnauthorizedResponse =
       response.status === 401 ||
-      response.status === 403 ||
+      (response.status === 403 && isAuthEndpoint) ||
       normalizedErrorText.includes("unauthorized") ||
       normalizedErrorText.includes("forbidden");
 
-    // Auth failure - clear stored token and notify app
-    if (isUnauthorizedResponse) {
+    if (isUnauthorizedResponse && isAuthEndpoint) {
       const token = getAuthToken();
       const decodedToken = token ? decodeJWT(token) : null;
       const patientId = token ? extractPatientIdFromToken(token) : null;
@@ -519,7 +590,151 @@ async function apiCall<T>(
       setAuthToken(null);
       // Notify listeners (mainly AuthContext) to update auth state
       window.dispatchEvent(new Event("auth:logout"));
-      throw new Error("Unauthorized: Please log in again");
+      // Prefer the actual backend error message so the user sees the real reason
+      const authErrMsg =
+        (data as Record<string, unknown>)?.message ??
+        (typeof data === "string" && data.length < 200 ? data : null) ??
+        "Unauthorized: Please log in again";
+      throw new Error(String(authErrMsg));
+    }
+
+    // For resource 401s — attempt a silent token refresh then retry once.
+    // This handles the common case where the access token has simply expired.
+    if (isUnauthorizedResponse) {
+      const storedRefreshToken = getRefreshToken();
+      const isRefreshEndpoint = endpoint.includes("/api/Account/RefreshToken");
+
+      if (storedRefreshToken && !isRefreshEndpoint) {
+        // Serialise concurrent refresh attempts
+        if (isRefreshing) {
+          // Wait for the in-progress refresh then retry
+          const newToken = await new Promise<string | null>((resolve) => {
+            refreshWaiters.push(resolve);
+          });
+          if (newToken) {
+            const cleanNew = newToken.replace(/^Bearer\s+/i, "");
+            const retryHeaders = {
+              ...headers,
+              Authorization: `Bearer ${cleanNew}`,
+            };
+            const retryRes = await fetch(url, {
+              ...options,
+              mode: "cors",
+              credentials: "omit",
+              headers: retryHeaders,
+            });
+            const retryText = await retryRes.text();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            let retryData: any;
+            try {
+              retryData = retryText ? JSON.parse(retryText) : undefined;
+            } catch {
+              retryData = retryText;
+            }
+            if (retryRes.ok) return { data: retryData, success: true };
+          }
+          // Refresh failed for this waiter — don't force logout.
+          // The original token may still be valid for other endpoints.
+          throw new Error(
+            `You do not have permission to access this resource (${endpoint}).`,
+          );
+        }
+
+        isRefreshing = true;
+        try {
+          const refreshRes = await fetch(
+            `${BASE_URL}/api/Account/RefreshToken`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              mode: "cors",
+              credentials: "omit",
+              body: JSON.stringify({ refreshToken: storedRefreshToken }),
+            },
+          );
+
+          if (refreshRes.ok) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const refreshData: any = await refreshRes.json();
+            const newAccessToken: string | undefined =
+              refreshData.token ?? refreshData.accessToken;
+            const newRefresh: string | undefined = refreshData.refreshToken;
+
+            if (newAccessToken) {
+              setAuthToken(newAccessToken);
+              if (newRefresh) setRefreshToken(newRefresh);
+
+              // Notify all waiting callers
+              const cleanNew = newAccessToken.replace(/^Bearer\s+/i, "");
+              refreshWaiters.forEach((resolve) => resolve(cleanNew));
+              refreshWaiters = [];
+              isRefreshing = false;
+
+              // Retry original request with new token
+              const retryHeaders = {
+                ...headers,
+                Authorization: `Bearer ${cleanNew}`,
+              };
+              const retryRes = await fetch(url, {
+                ...options,
+                mode: "cors",
+                credentials: "omit",
+                headers: retryHeaders,
+              });
+              const retryText = await retryRes.text();
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              let retryData: any;
+              try {
+                retryData = retryText ? JSON.parse(retryText) : undefined;
+              } catch {
+                retryData = retryText;
+              }
+              if (retryRes.ok) return { data: retryData, success: true };
+              // Retry also failed
+              const retryMsg =
+                retryData?.message ??
+                `Unauthorized: You do not have permission to access ${endpoint}`;
+              throw new Error(String(retryMsg));
+            }
+          }
+        } catch (refreshErr) {
+          // If it's an error we threw ourselves (from retry above), re-throw
+          if (
+            refreshErr instanceof Error &&
+            !refreshErr.message.includes("RefreshToken")
+          ) {
+            refreshWaiters.forEach((resolve) => resolve(null));
+            refreshWaiters = [];
+            isRefreshing = false;
+            throw refreshErr;
+          }
+        } finally {
+          if (isRefreshing) {
+            refreshWaiters.forEach((resolve) => resolve(null));
+            refreshWaiters = [];
+            isRefreshing = false;
+          }
+        }
+
+        // Refresh request itself failed — throw but keep the user session alive.
+        // The access token may still be valid; a single endpoint rejecting it
+        // does not mean the entire session is invalid.
+        console.warn(
+          "[apiCall] Token refresh failed for",
+          endpoint,
+          "— keeping session active",
+        );
+        const refreshFailMsg =
+          (data as Record<string, unknown>)?.message ??
+          `You do not have permission to access ${endpoint}`;
+        throw new Error(String(refreshFailMsg));
+      }
+
+      // No refresh token available
+      const msg =
+        (data as Record<string, unknown>)?.message ??
+        `Unauthorized: You do not have permission to access ${endpoint}`;
+      throw new Error(String(msg));
     }
 
     // 400 Bad Request - log full response for debugging
@@ -618,16 +833,22 @@ async function apiCall<T>(
     }
 
     const errorMessage =
-      data && data.message ? data.message : response.statusText;
+      data &&
+      typeof data === "object" &&
+      (data as Record<string, unknown>).message
+        ? String((data as Record<string, unknown>).message)
+        : typeof data === "string" && data.trim()
+          ? data.trim()
+          : response.statusText;
     console.error(
       "[apiCall] Error:",
       endpoint,
       response.status,
       errorMessage,
-      "Data:",
+      "Full response body:",
       data,
     );
-    throw new Error(`API Error: ${errorMessage}`);
+    throw new Error(errorMessage);
   }
 
   if (DEBUG_API) {
@@ -641,6 +862,82 @@ async function apiCall<T>(
 export const authService = {
   hasStoredToken(): boolean {
     return !!getAuthToken();
+  },
+
+  /**
+   * Extract the current user's numeric ID from the stored JWT token claims.
+   * The backend doesn't return an id field in LoginResponseDTO, so the only
+   * reliable source is the token's nameid / sub / userId claim.
+   */
+  getCurrentUserIdFromToken(): string | null {
+    const token = getAuthToken();
+    return token ? extractPatientIdFromToken(token) : null;
+  },
+
+  /**
+   * Resolve the logged-in doctor's integer ID.
+   * Priority:
+   *   1. A numeric value from JWT claims (DoctorId / nameid / sub etc.) — skips GUIDs
+   *   2. The doctorId from GET /api/doctor/dashboard (JWT-scoped, no appointments needed)
+   *   3. The doctorId embedded in the first appointment from the backend
+   *      (reliable because GET /api/doctor/appointments is JWT-scoped).
+   * Returns null if no source yields a valid positive integer.
+   */
+  async resolveCurrentDoctorId(): Promise<number | null> {
+    // 1. Try JWT claims — only accept numeric (non-GUID) values
+    const fromToken = this.getCurrentUserIdFromToken();
+    const fromTokenNum = fromToken ? Number(fromToken) : NaN;
+    if (Number.isFinite(fromTokenNum) && fromTokenNum > 0) {
+      return fromTokenNum;
+    }
+
+    // 2. Try the doctor dashboard endpoint — JWT-scoped, works even with zero appointments
+    try {
+      const dashRes = await apiCall<unknown>("/api/doctor/dashboard", {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const dash = dashRes.data as any;
+      const fromDash = Number(dash?.doctorId ?? dash?.id ?? dash?.dentistId);
+      if (Number.isFinite(fromDash) && fromDash > 0) {
+        console.debug(
+          "[resolveCurrentDoctorId] Found doctor ID from dashboard:",
+          fromDash,
+        );
+        return fromDash;
+      }
+    } catch (e) {
+      console.warn("[resolveCurrentDoctorId] Dashboard call failed:", e);
+    }
+
+    // 3. Fetch the doctor's appointments and pull the doctorId from the first record
+    try {
+      const res = await apiCall<unknown[]>("/api/doctor/appointments", {
+        method: "GET",
+      });
+      const items = Array.isArray(res.data) ? res.data : [];
+      for (const item of items) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const a = item as any;
+        const id = Number(
+          a.dentistId ?? a.doctorId ?? a.doctor?.id ?? a.doctor?.dentistId,
+        );
+        if (Number.isFinite(id) && id > 0) {
+          console.debug(
+            "[resolveCurrentDoctorId] Found doctor ID from appointments:",
+            id,
+          );
+          return id;
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[resolveCurrentDoctorId] Could not fetch appointments to resolve doctorId:",
+        e,
+      );
+    }
+
+    return null;
   },
 
   async forgotPassword(data: ForgotPasswordDTO): Promise<ApiResponse<void>> {
@@ -688,6 +985,8 @@ export const authService = {
       email: string;
       role: string;
       token: string;
+      refreshToken?: string;
+      expiration?: string;
       userId?: string;
       id?: string;
     }>
@@ -697,6 +996,8 @@ export const authService = {
       email: string;
       role: string;
       token: string;
+      refreshToken?: string;
+      expiration?: string;
       userId?: string;
       id?: string;
     }>("/api/Account/login", {
@@ -715,6 +1016,9 @@ export const authService = {
     // Try to extract ID from response (backend may include it)
     if (userData && userData.token) {
       setAuthToken(userData.token);
+      if (userData.refreshToken) {
+        setRefreshToken(userData.refreshToken);
+      }
       console.debug(
         "[authService] Login successful, token stored:",
         userData.token.substring(0, 30) + "...",
@@ -778,6 +1082,8 @@ export const authService = {
       email: string;
       role: string;
       token: string;
+      refreshToken?: string;
+      expiration?: string;
       userId?: string;
       id?: string;
     }>
@@ -816,6 +1122,8 @@ export const authService = {
       email: string;
       role: string;
       token: string;
+      refreshToken?: string;
+      expiration?: string;
       userId?: string;
       id?: string;
     }>("/api/Account/register", {
@@ -833,6 +1141,9 @@ export const authService = {
     if (userData && userData.token) {
       // Token received - user can proceed directly
       setAuthToken(userData.token);
+      if (userData.refreshToken) {
+        setRefreshToken(userData.refreshToken);
+      }
       console.debug(
         "[authService] Registration successful, token stored:",
         userData.token.substring(0, 30) + "...",
@@ -895,12 +1206,30 @@ export const authService = {
 
   /**
    * Logout the user
-   * Clears token from memory
+   * POST /api/Account/logout — sends refresh token to backend to invalidate it
    */
   async logout(): Promise<void> {
-    // Clear token from memory
+    const currentRefreshToken = getRefreshToken();
+
+    // Best-effort server-side logout (invalidate refresh token)
+    if (currentRefreshToken) {
+      try {
+        const body: RevokeTokenDTO = { refreshToken: currentRefreshToken };
+        await apiCall<void>("/api/Account/logout", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        console.debug("[authService] Server-side logout successful");
+      } catch (e) {
+        // Non-fatal: still clear local tokens even if backend call fails
+        console.warn("[authService] Server-side logout failed (non-fatal):", e);
+      }
+    }
+
+    // Always clear local tokens
     setAuthToken(null);
-    console.debug("[authService] Logout successful, token cleared");
+    setRefreshToken(null);
+    console.debug("[authService] Local tokens cleared");
 
     // Notify listeners (AuthContext) about logout
     try {
@@ -908,6 +1237,60 @@ export const authService = {
     } catch (e) {
       console.error("[authService] Error notifying logout:", e);
     }
+  },
+
+  /**
+   * Refresh the access token using a refresh token
+   * POST /api/Account/RefreshToken
+   * Returns new AuthResponseDTO with fresh token + refreshToken
+   */
+  async refreshToken(): Promise<AuthResponseDTO> {
+    const currentRefreshToken = getRefreshToken();
+    if (!currentRefreshToken) {
+      throw new Error("No refresh token available");
+    }
+    const body: RefreshTokenRequestDTO = { refreshToken: currentRefreshToken };
+    const response = await apiCall<AuthResponseDTO>(
+      "/api/Account/RefreshToken",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    const result = response.data;
+    if (result?.token) {
+      setAuthToken(result.token);
+    }
+    if (result?.refreshToken) {
+      setRefreshToken(result.refreshToken);
+    }
+    return result ?? {};
+  },
+
+  /**
+   * Revoke a refresh token (explicit revocation without full logout)
+   * POST /api/Account/RevokeRefreshToken
+   */
+  async revokeRefreshToken(refreshTokenValue?: string): Promise<void> {
+    const tokenToRevoke = refreshTokenValue ?? getRefreshToken();
+    if (!tokenToRevoke) return;
+    const body: RefreshTokenRequestDTO = { refreshToken: tokenToRevoke };
+    await apiCall<void>("/api/Account/RevokeRefreshToken", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    console.debug("[authService] Refresh token revoked");
+  },
+
+  /**
+   * Confirm email address via link from email
+   * GET /api/Account/confirm-email?UserId=...&Token=...
+   */
+  async confirmEmail(userId: string, token: string): Promise<void> {
+    const params = new URLSearchParams({ UserId: userId, Token: token });
+    await apiCall<void>(`/api/Account/confirm-email?${params.toString()}`, {
+      method: "GET",
+    });
   },
 
   /**
@@ -1330,38 +1713,59 @@ export const doctorService = {
         );
         // Map DoctorDTO from backend to Doctor type
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doctors = (res.data as any[]).map((doc: any) => ({
-          id: String(doc.id ?? 1),
-          name: doc.name ?? "Unknown",
-          specialty: normalizeSpecialty(
-            doc.specialty ?? doc.specializationName ?? doc.specialization,
-          ),
-          email: doc.email ?? "",
-          phone: doc.phoneNumber ?? "",
-          photo: doc.photo ?? doc.profileImage ?? undefined,
-          experience: doc.experience ?? doc.yearsOfExperience ?? 0,
-          languages: doc.languages ?? [],
-          // Fill other required fields with defaults
-          role: doc.role ?? "doctor",
-          qualifications: doc.qualifications ?? [],
-          bio: doc.bio ?? doc.description ?? "",
-          consultationFee: doc.consultationFee ?? 0,
-          rating: doc.rating ?? 0,
-          totalPatients: doc.totalPatients ?? 0,
-          department: doc.department ?? "General",
-          clinic: doc.clinic ?? "",
-          availableSlots: doc.availableSlots ?? [],
-          reviewCount: doc.reviewCount ?? 0,
-          workingDays: doc.workingDays ?? [],
-          firstName: doc.firstName ?? doc.name?.split(" ")[0] ?? "",
-          lastName: doc.lastName ?? doc.name?.split(" ")[1] ?? "",
-          avatar: doc.photo ?? doc.profileImage ?? undefined,
-          profileImage: doc.profileImage ?? doc.photo ?? undefined,
-          // Store raw specializationId for reliable doctor filtering by service
-          specializationId: doc.specializationId ?? null,
-          createdAt: doc.createdAt ?? new Date(),
-          updatedAt: doc.updatedAt ?? new Date(),
-        })) as unknown as Doctor[];
+        const doctors = (res.data as any[]).map((doc: any) => {
+          const fallbackName =
+            doc.name ??
+            doc.fullName ??
+            `${doc.firstName ?? ""} ${doc.lastName ?? ""}`;
+          const normalizedName = splitDoctorName(fallbackName);
+          const normalizedFirstName = stripDoctorTitle(
+            doc.firstName ?? normalizedName.firstName,
+          );
+          const normalizedLastName = stripDoctorTitle(
+            doc.lastName ?? normalizedName.lastName,
+          );
+          const doctorAvatar = resolveBackendAssetUrl(
+            doc.photo ??
+              doc.profileImage ??
+              doc.avatar ??
+              doc.imageUrl ??
+              doc.profilePicture,
+          );
+
+          return {
+            id: String(doc.id ?? 1),
+            name: doc.name ?? "Unknown",
+            specialty: normalizeSpecialty(
+              doc.specialty ?? doc.specializationName ?? doc.specialization,
+            ),
+            email: doc.email ?? "",
+            phone: doc.phoneNumber ?? "",
+            photo: doctorAvatar,
+            experience: doc.experience ?? doc.yearsOfExperience ?? 0,
+            languages: doc.languages ?? [],
+            // Fill other required fields with defaults
+            role: doc.role ?? "doctor",
+            qualifications: doc.qualifications ?? [],
+            bio: doc.bio ?? doc.description ?? "",
+            consultationFee: doc.consultationFee ?? 0,
+            rating: doc.rating ?? 0,
+            totalPatients: doc.totalPatients ?? 0,
+            department: doc.department ?? "General",
+            clinic: doc.clinic ?? "",
+            availableSlots: doc.availableSlots ?? [],
+            reviewCount: doc.reviewCount ?? 0,
+            workingDays: doc.workingDays ?? [],
+            firstName: normalizedFirstName,
+            lastName: normalizedLastName,
+            avatar: doctorAvatar,
+            profileImage: doctorAvatar,
+            // Store raw specializationId for reliable doctor filtering by service
+            specializationId: doc.specializationId ?? null,
+            createdAt: doc.createdAt ?? new Date(),
+            updatedAt: doc.updatedAt ?? new Date(),
+          };
+        }) as unknown as Doctor[];
         return { data: doctors, success: true };
       }
     } catch (error) {
@@ -1375,6 +1779,78 @@ export const doctorService = {
     console.warn(
       "[doctorService.getAll] ⚠️ Backend unavailable, returning empty doctor list",
     );
+    return { data: [], success: false };
+  },
+
+  /**
+   * Get doctors filtered by speciality
+   * GET /api/Lookup/DoctorsBySpeciality/{specialityId}
+   */
+  async getDoctorsBySpeciality(
+    specialityId: number,
+  ): Promise<ApiResponse<Doctor[]>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>(
+        `/api/Lookup/DoctorsBySpeciality/${specialityId}`,
+        { method: "GET" },
+      );
+      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doctors = (res.data as any[]).map((doc: any) => {
+          const fallbackName =
+            doc.name ??
+            doc.fullName ??
+            `${doc.firstName ?? ""} ${doc.lastName ?? ""}`;
+          const normalizedName = splitDoctorName(fallbackName);
+          const doctorAvatar = resolveBackendAssetUrl(
+            doc.photo ??
+              doc.profileImage ??
+              doc.avatar ??
+              doc.imageUrl ??
+              doc.profilePicture,
+          );
+          return {
+            id: String(doc.id ?? 1),
+            name: doc.name ?? "Unknown",
+            specialty: normalizeSpecialty(
+              doc.specialty ?? doc.specializationName ?? doc.specialization,
+            ),
+            email: doc.email ?? "",
+            phone: doc.phoneNumber ?? "",
+            photo: doctorAvatar,
+            experience: doc.experience ?? doc.yearsOfExperience ?? 0,
+            languages: doc.languages ?? [],
+            role: doc.role ?? "doctor",
+            qualifications: doc.qualifications ?? [],
+            bio: doc.bio ?? doc.description ?? "",
+            consultationFee: doc.consultationFee ?? 0,
+            rating: doc.rating ?? 0,
+            totalPatients: doc.totalPatients ?? 0,
+            department: doc.department ?? "General",
+            clinic: doc.clinic ?? "",
+            availableSlots: doc.availableSlots ?? [],
+            reviewCount: doc.reviewCount ?? 0,
+            workingDays: doc.workingDays ?? [],
+            firstName: stripDoctorTitle(
+              doc.firstName ?? normalizedName.firstName,
+            ),
+            lastName: stripDoctorTitle(doc.lastName ?? normalizedName.lastName),
+            avatar: doctorAvatar,
+            profileImage: doctorAvatar,
+            specializationId: doc.specializationId ?? specialityId,
+            createdAt: doc.createdAt ?? new Date(),
+            updatedAt: doc.updatedAt ?? new Date(),
+          };
+        }) as unknown as Doctor[];
+        return { data: doctors, success: true };
+      }
+    } catch (error) {
+      console.error(
+        "[doctorService.getDoctorsBySpeciality] Error:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     return { data: [], success: false };
   },
 
@@ -1400,26 +1876,10 @@ export const doctorService = {
         doctorId,
         date,
       );
-      if (result.success && result.data && result.data.length > 0) {
-        return result;
-      }
+      return result;
     } catch {
-      // fall through to default slots
+      return { data: [], success: false };
     }
-    // Fallback to hardcoded slots when backend returns empty or fails
-    const slots = [
-      "09:00",
-      "09:30",
-      "10:00",
-      "10:30",
-      "11:00",
-      "14:00",
-      "14:30",
-      "15:00",
-      "15:30",
-      "16:00",
-    ];
-    return { data: slots, success: true };
   },
 
   // Real backend endpoints
@@ -1603,44 +2063,11 @@ export const adminPatientService = {
    * GET /api/admin/patients
    */
   async getAll(): Promise<PaginatedResponse<Patient>> {
-    const candidateEndpoints = [
-      "/api/admin/patients",
-      "/api/admin/patient",
-      "/api/admin/Patients",
-      "/api/admin/GetPatients",
-      "/api/admin/patients/all",
-    ];
+    // NOTE: The backend does NOT expose a GET /api/admin/patients endpoint.
+    // The only admin patient endpoint is POST /api/admin/CreatePatients.
+    // We derive the patient list from the appointments data instead.
 
     let lastError: unknown = null;
-
-    for (const endpoint of candidateEndpoints) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res = await apiCall<any>(endpoint, { method: "GET" });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const payload = res.data as any;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rawData: any[] = Array.isArray(payload)
-          ? payload
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-
-        const patients = rawData.map((item) =>
-          adminPatientService.mapBackendToPatient(item),
-        );
-
-        return {
-          data: patients,
-          total: Number(payload?.total ?? patients.length),
-          page: Number(payload?.page ?? 1),
-          limit: Number((payload?.limit ?? patients.length) || 10),
-          totalPages: Number(payload?.totalPages ?? 1),
-        };
-      } catch (error) {
-        lastError = error;
-      }
-    }
 
     // Fallback: derive patient list from admin appointments endpoint.
     // This keeps admin patient screens functional even if backend exposes
@@ -1656,9 +2083,8 @@ export const adminPatientService = {
       const patientsMap = new Map<string, Patient>();
 
       for (const appointment of appointments) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nestedPatient = (appointment?.patient ||
-          appointment?.patientDTO) as any;
+          appointment?.patientDTO) as Record<string, unknown> | undefined;
 
         if (nestedPatient) {
           const mapped = adminPatientService.mapBackendToPatient(nestedPatient);
@@ -1700,7 +2126,6 @@ export const adminPatientService = {
     }
 
     console.error("[adminPatientService.getAll] Failed to fetch patients", {
-      candidateEndpoints,
       lastError,
     });
 
@@ -1910,6 +2335,9 @@ export const appointmentService = {
       startTime,
       amount: 0,
       paymentMethod: "Cash",
+      // Backend [Required] rejects null; send a placeholder for Cash bookings.
+      // Once backend removes the [Required] attribute this can be set to null.
+      paymentIntentId: "CASH_PAYMENT",
     };
 
     if (patientId !== undefined) dto.patientId = patientId;
@@ -2000,6 +2428,16 @@ export const appointmentService = {
         "",
     );
 
+    // Build doctor from flat doctorName payloads (mirrors patientName handling)
+    const rawDoctorName = String(
+      item.doctorName || item.doctor_name || "",
+    ).trim();
+    const { firstName: doctorFirstName, lastName: doctorLastName } =
+      splitDoctorName(rawDoctorName || null);
+    const doctorIdFromName = rawDoctorName
+      ? `doctor-${rawDoctorName.toLowerCase().replace(/\s+/g, "-")}`
+      : "";
+
     // Map doctor object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const doctorObj = item.doctor ? (item.doctor as any) : undefined;
@@ -2025,7 +2463,28 @@ export const appointmentService = {
           createdAt: doctorObj.createdAt || new Date().toISOString(),
           updatedAt: doctorObj.updatedAt || new Date().toISOString(),
         }
-      : undefined;
+      : rawDoctorName
+        ? {
+            id: String(item.doctorId || item.dentistId || doctorIdFromName),
+            email: "",
+            firstName: doctorFirstName,
+            lastName: doctorLastName,
+            phone: "",
+            avatar: "",
+            role: "doctor" as const,
+            specialty: "general" as const,
+            qualifications: [],
+            experience: 0,
+            bio: "",
+            consultationFee: 0,
+            rating: 0,
+            reviewCount: 0,
+            availableSlots: [],
+            workingDays: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }
+        : undefined;
 
     // Map service object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2053,6 +2512,7 @@ export const appointmentService = {
       ? `patient-${patientName.toLowerCase().replace(/\s+/g, "-")}`
       : "";
 
+    // Build doctor from flat doctorName payloads (mirrors patientName handling)
     // Map patient object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const patientObj = item.patient ? (item.patient as any) : undefined;
@@ -2119,6 +2579,29 @@ export const appointmentService = {
       updatedAt:
         item.updatedAt || fallback?.updatedAt || new Date().toISOString(),
     };
+  },
+};
+
+// Specialization lookup — returns raw { id, name } pairs from the backend
+export const specializationService = {
+  async getAll(): Promise<ApiResponse<{ id: number; name: string }[]>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any[]>("/api/Lookup/Specializations", {
+        method: "GET",
+      });
+      if (res.data && Array.isArray(res.data)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const items = (res.data as any[]).map((s: any) => ({
+          id: Number(s.id),
+          name: String(s.name ?? ""),
+        }));
+        return { data: items, success: true };
+      }
+    } catch {
+      // non-critical
+    }
+    return { data: [], success: false };
   },
 };
 
@@ -2444,11 +2927,36 @@ export const reviewService = {
 export const adminDoctorService = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mapBackendToDoctor(doc: any): Doctor {
-    const { firstName, lastName } = splitName(
-      doc.fullName ??
-        doc.name ??
-        `${doc.firstName ?? ""} ${doc.lastName ?? ""}`,
-    );
+    // Log every unique set of keys once so we can see what the backend actually returns
+    console.debug("[mapBackendToDoctor] raw doc keys:", Object.keys(doc), doc);
+
+    const isEmail = (v?: string | null) =>
+      typeof v === "string" && v.includes("@");
+
+    // Try every plausible name field the backend might return
+    // displayName takes priority — it's what the admin updates via PUT
+    const rawName =
+      (!isEmail(doc.displayName) && doc.displayName ? doc.displayName : null) ??
+      (!isEmail(doc.fullName) && doc.fullName ? doc.fullName : null) ??
+      (!isEmail(doc.name) && doc.name ? doc.name : null) ??
+      (!isEmail(doc.userName) && doc.userName ? doc.userName : null) ??
+      (doc.firstName || doc.lastName
+        ? `${doc.firstName ?? ""} ${doc.lastName ?? ""}`.trim() || null
+        : null) ??
+      // Last resort: derive from email ("john.smith@x.com" → "John Smith")
+      (doc.email
+        ? doc.email
+            .split("@")[0]
+            .split(/[._\-+]/)
+            .map(
+              (p: string) =>
+                String(p).charAt(0).toUpperCase() +
+                String(p).slice(1).toLowerCase(),
+            )
+            .join(" ")
+        : null);
+
+    const { firstName, lastName } = splitName(rawName);
 
     return {
       id: String(doc.id ?? ""),
@@ -2456,19 +2964,28 @@ export const adminDoctorService = {
       phone: doc.phone ?? doc.phoneNumber ?? "",
       firstName: doc.firstName ?? firstName,
       lastName: doc.lastName ?? lastName,
-      avatar: doc.avatar,
+      avatar: doc.avatar ?? doc.imageUrl ?? doc.profileImage,
       role: "doctor" as const,
       specialty: normalizeSpecialty(
         doc.specialty ?? doc.specializationName ?? doc.specialityName,
       ),
       qualifications: doc.qualifications ?? [],
-      experience: doc.experience ?? doc.workingHours ?? 0,
+      // yearsOfExperience is the canonical backend field; fall back to workingHours
+      experience:
+        doc.yearsOfExperience ?? doc.experience ?? doc.workingHours ?? 0,
       bio: doc.bio ?? "",
+      // consultationFee is returned directly; salary is the backend storage name
       consultationFee: doc.consultationFee ?? doc.salary ?? 0,
       rating: doc.rating ?? 0,
       reviewCount: doc.reviewCount ?? 0,
       availableSlots: doc.availableSlots ?? [],
       workingDays: doc.workingDays ?? [],
+      isActive:
+        typeof doc.isActive === "boolean"
+          ? doc.isActive
+          : doc.status
+            ? String(doc.status).toLowerCase() !== "inactive"
+            : true,
       createdAt: doc.createdAt ?? new Date().toISOString(),
       updatedAt: doc.updatedAt ?? new Date().toISOString(),
     };
@@ -2542,7 +3059,7 @@ export const adminDoctorService = {
         "[adminDoctorService.getAll] ❌ Error:",
         error instanceof Error ? error.message : String(error),
       );
-      return { data: [], success: false };
+      throw error; // propagate so UI shows error toast instead of silent empty list
     }
   },
 
@@ -2572,29 +3089,33 @@ export const adminDoctorService = {
    */
   async create(data: Partial<Doctor>): Promise<ApiResponse<Doctor>> {
     try {
-      const specialityID = await adminDoctorService.resolveSpecialityId(
-        data.specialty,
-      );
-      const password =
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ((data as any).password as string | undefined) ?? undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const d = data as any;
 
+      // Build payload matching CreateDoctorDto exactly
+      const password = (d.password as string | undefined)?.trim();
+      if (!password) {
+        throw new Error("Password is required and cannot be empty");
+      }
+      const specialityID =
+        Number(d.specialityID) > 0 ? Number(d.specialityID) : undefined;
+      if (!specialityID) {
+        throw new Error("A valid specialty must be selected");
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: any = {
-        fullName: `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim(),
-        email: data.email ?? "",
-        salary: Number(data.consultationFee ?? 0),
-        workingHours: Number(data.experience ?? 0),
-        hiringDate: new Date().toISOString(),
+        fullName: (d.fullName as string | undefined)?.trim() ?? "",
+        email: (d.email as string | undefined)?.trim() ?? "",
+        password,
+        salary: Math.max(0, Number(d.salary ?? 0)),
+        workingHours: Math.max(0, Number(d.workingHours ?? 0)),
+        hiringDate: d.hiringDate ?? new Date().toISOString(),
+        specialityID,
+        gender: (d.gender as string | undefined)?.trim() ?? "",
+        address: (d.address as string | undefined)?.trim() ?? "",
       };
 
-      if (typeof specialityID === "number" && Number.isFinite(specialityID)) {
-        payload.specialityID = specialityID;
-      }
-
-      if (password && password.trim().length > 0) {
-        payload.password = password;
-      }
+      console.debug("[adminDoctorService.create] Sending payload:", payload);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiCall<any>("/api/admin/doctors", {
@@ -2635,19 +3156,22 @@ export const adminDoctorService = {
     data: Partial<Doctor>,
   ): Promise<ApiResponse<Doctor>> {
     try {
-      const specialityID = await adminDoctorService.resolveSpecialityId(
-        data.specialty,
-      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const d = data as any;
+      const specialityID =
+        Number(d.specialityID) > 0 ? Number(d.specialityID) : undefined;
+      if (!specialityID) {
+        throw new Error("A valid specialty must be selected");
+      }
 
+      // Build payload matching UpdateDoctorDto exactly
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const payload: any = {
-        salary: Number(data.consultationFee ?? 0),
-        workingHours: Number(data.experience ?? 0),
+        displayName: (d.fullName as string | undefined)?.trim() || undefined,
+        salary: Math.max(0, Number(d.salary ?? 0)),
+        workingHours: Math.max(0, Number(d.workingHours ?? 0)),
+        specialityID,
       };
-
-      if (typeof specialityID === "number" && Number.isFinite(specialityID)) {
-        payload.specialityID = specialityID;
-      }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await apiCall<any>(`/api/admin/doctors/${id}`, {
@@ -2730,55 +3254,24 @@ export const adminAppointmentService = {
    * GET /api/admin/appointments
    */
   async getAll(): Promise<ApiResponse<Appointment[]>> {
-    try {
-      console.debug(
-        "[adminAppointmentService.getAll] Fetching from /api/admin/appointments...",
-      );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiCall<any[]>("/api/admin/appointments", {
-        method: "GET",
-      });
-      console.debug("[adminAppointmentService.getAll] Raw response:", res);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = (res.data || []) as any[];
-      const appointments = data.map((item) =>
-        appointmentService.mapBackendToAppointment(item),
-      );
-
-      // Validate that appointments have proper data - if not, use mock data
-      const hasValidAppointments = appointments.some(
-        (a) => a.patientId || a.doctorId || !!a.status,
-      );
-
-      if (appointments.length === 0 || !hasValidAppointments) {
-        console.warn(
-          "[adminAppointmentService.getAll] ⚠️ API returned empty or invalid appointment data",
-        );
-        console.warn(
-          "[adminAppointmentService.getAll] ⚠️ Falling back to mock appointments for demonstration",
-        );
-        await delay(400);
-        return { data: mockAppointments, success: true };
-      }
-
-      console.debug(
-        "[adminAppointmentService.getAll] ✅ Successfully mapped appointments:",
-        appointments.length,
-      );
-      return { data: appointments, success: true };
-    } catch (error) {
-      console.error(
-        "[adminAppointmentService.getAll] ❌ Error:",
-        error instanceof Error ? error.message : String(error),
-      );
-      console.warn(
-        "[adminAppointmentService.getAll] ⚠️ Falling back to mock appointments for demonstration",
-      );
-      // Fall back to mock data for demonstration/testing
-      await delay(400);
-      return { data: mockAppointments, success: true };
-    }
+    console.debug(
+      "[adminAppointmentService.getAll] Fetching from /api/admin/appointments...",
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiCall<any[]>("/api/admin/appointments", {
+      method: "GET",
+    });
+    console.debug("[adminAppointmentService.getAll] Raw response:", res);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (res.data || []) as any[];
+    const appointments = data.map((item) =>
+      appointmentService.mapBackendToAppointment(item),
+    );
+    console.debug(
+      "[adminAppointmentService.getAll] ✅ Mapped appointments:",
+      appointments.length,
+    );
+    return { data: appointments, success: true };
   },
 
   /**
@@ -2806,74 +3299,66 @@ export const adminAppointmentService = {
    * POST /api/admin/appointments
    * Uses CreateAppointmentByAdminDTO: doctorID, patientID, date, startTime, amount, paymentMethod
    */
-  async create(
-    data: Omit<Appointment, "id" | "createdAt" | "updatedAt">,
-  ): Promise<ApiResponse<Appointment>> {
-    try {
-      const doctorID = Number(data.doctorId) || 0;
-      const patientID = Number(data.patientId) || 0;
-
-      const dateIso = data.date
-        ? new Date(`${data.date}T00:00:00`).toISOString()
-        : new Date().toISOString();
-
-      const startTime = data.time
-        ? data.time.includes(":") && data.time.split(":").length === 2
-          ? `${data.time}:00`
-          : data.time
-        : "09:00:00";
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const payload: any = {
-        doctorID,
-        patientID,
-        date: dateIso,
-        startTime,
-        amount: 0,
-        paymentMethod: "Cash",
-        paymentStatus: "Unpaid",
-      };
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiCall<any>("/api/admin/appointments", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      return {
-        data: appointmentService.mapBackendToAppointment(res.data),
-        success: true,
-        message: "Appointment created successfully",
-      };
-    } catch (error) {
-      console.error("[adminAppointmentService.create] Error:", error);
-      return { data: {} as Appointment, success: false };
-    }
+  async create(payload: {
+    doctorID: number;
+    patientID: number;
+    date: string; // ISO date-time
+    startTime: string; // "HH:mm:ss"
+    amount: number;
+    paymentMethod: "Cash" | "Visa";
+    paymentStatus?: string;
+  }): Promise<ApiResponse<Appointment>> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiCall<any>("/api/admin/appointments", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return {
+      data: res.data
+        ? appointmentService.mapBackendToAppointment(res.data)
+        : ({} as Appointment),
+      success: true,
+      message: "Appointment created successfully",
+    };
   },
 
   /**
    * Update appointment status
    * PATCH /api/admin/appointments/{id}/status
+   * Body: AppointmentStatus enum string sent directly (not wrapped in object)
+   * Backend enum values: Pending | Approved | Rejected | Completed | Cancelled
    */
   async updateStatus(
     id: string,
     status: string,
   ): Promise<ApiResponse<Appointment>> {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiCall<any>(`/api/admin/appointments/${id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      return {
-        data: appointmentService.mapBackendToAppointment(res.data),
-        success: true,
-        message: "Appointment status updated",
-      };
-    } catch (error) {
-      console.error("[adminAppointmentService.updateStatus] Error:", error);
-      return { data: {} as Appointment, success: false };
-    }
+    // Map frontend status values to backend enum (capitalized)
+    const statusMap: Record<string, string> = {
+      complete: "Completed",
+      completed: "Completed",
+      upcoming: "Approved",
+      pending: "Pending",
+      approved: "Approved",
+      rejected: "Rejected",
+      cancelled: "Cancelled",
+      canceled: "Cancelled",
+    };
+    const backendStatus =
+      statusMap[status.toLowerCase()] ??
+      status.charAt(0).toUpperCase() + status.slice(1);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await apiCall<any>(`/api/admin/appointments/${id}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(backendStatus), // plain enum string, NOT { status: ... }
+    });
+    return {
+      data: res.data
+        ? appointmentService.mapBackendToAppointment(res.data)
+        : ({} as Appointment),
+      success: true,
+      message: "Appointment status updated",
+    };
   },
 
   /**
@@ -3171,11 +3656,15 @@ export const doctorScheduleService = {
    */
   async getSchedule(doctorId: string): Promise<ApiResponse<DoctorSchedule[]>> {
     try {
-      const res = await apiCall<DoctorSchedule[]>(
-        `/api/DoctorSchedule/${doctorId}`,
-        { method: "GET" },
-      );
-      return { data: res.data || [], success: true };
+      const res = await apiCall<unknown>(`/api/DoctorSchedule/${doctorId}`, {
+        method: "GET",
+      });
+      // API returns { value: DoctorSchedule[], Count: number } or a plain array
+      const raw = res.data as { value?: DoctorSchedule[] } | DoctorSchedule[];
+      const scheduleArray: DoctorSchedule[] = Array.isArray(raw)
+        ? raw
+        : ((raw as { value?: DoctorSchedule[] }).value ?? []);
+      return { data: scheduleArray, success: true };
     } catch (error) {
       console.error("[doctorScheduleService.getSchedule] Error:", error);
       return { data: [], success: false };
@@ -3185,19 +3674,47 @@ export const doctorScheduleService = {
   /**
    * Get available time slots for a doctor on a given date
    * GET /api/DoctorSchedule/{doctorId}/available-slots?date=YYYY-MM-DDTHH:mm:ss
+   * Backend returns: Array<{ date: string; startTime: string; endTime: string; isAvailable: boolean }>
+   * We extract startTime strings for available slots only.
    */
   async getAvailableSlots(
     doctorId: string,
     date: string,
   ): Promise<ApiResponse<string[]>> {
     try {
-      // Convert plain date string "YYYY-MM-DD" to ISO datetime if needed
-      const isoDate = date.includes("T") ? date : `${date}T00:00:00`;
-      const res = await apiCall<string[]>(
-        `/api/DoctorSchedule/${doctorId}/available-slots?date=${encodeURIComponent(isoDate)}`,
+      // Backend expects full ISO date-time (format: date-time per Swagger).
+      // Sending just YYYY-MM-DD causes the backend to skip appointment cross-checking,
+      // so all slots come back as isAvailable: true even when booked.
+      const datePart = date.includes("T") ? date.split("T")[0] : date;
+      const isoDateTime = `${datePart}T00:00:00`;
+      type SlotItem = {
+        date: string;
+        startTime: string;
+        endTime: string;
+        isAvailable: boolean;
+      };
+      const res = await apiCall<unknown>(
+        `/api/DoctorSchedule/${doctorId}/available-slots?date=${encodeURIComponent(isoDateTime)}`,
         { method: "GET" },
       );
-      return { data: res.data || [], success: true };
+      // API returns { value: SlotItem[], Count: number } or a plain array
+      const raw = res.data as { value?: SlotItem[] } | SlotItem[];
+      const dataArray: SlotItem[] = Array.isArray(raw)
+        ? raw
+        : ((raw as { value?: SlotItem[] }).value ?? []);
+
+      console.debug(
+        "[getAvailableSlots] Raw slots from backend:",
+        dataArray.map((s) => ({
+          startTime: s.startTime,
+          isAvailable: s.isAvailable,
+        })),
+      );
+
+      const slots = dataArray
+        .filter((s) => s.isAvailable)
+        .map((s) => (s.startTime as string).slice(0, 5));
+      return { data: slots, success: true };
     } catch (error) {
       console.error("[doctorScheduleService.getAvailableSlots] Error:", error);
       return { data: [], success: false };

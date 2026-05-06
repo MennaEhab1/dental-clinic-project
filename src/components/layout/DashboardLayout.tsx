@@ -18,6 +18,7 @@ import {
   Sparkles,
   History,
   Star,
+  CalendarDays,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
@@ -43,6 +44,7 @@ const patientNav = [
 const doctorNav = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/doctor/dashboard" },
   { icon: Calendar, label: "Appointments", href: "/doctor/appointments" },
+  { icon: CalendarDays, label: "My Schedule", href: "/doctor/schedule" },
   { icon: Users, label: "My Patients", href: "/doctor/patients" },
   { icon: FileText, label: "Medical Records", href: "/doctor/records" },
   { icon: MessageSquare, label: "Messages", href: "/doctor/messages" },

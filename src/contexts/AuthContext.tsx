@@ -142,7 +142,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     try {
       const response = await authService.login(credentials);
-      const userData = normalizeBackendUser(response.data as BackendUser);
+      const rawData = response.data as BackendUser;
+      // The backend LoginResponseDTO omits the user's numeric ID.
+      // Extract it from the JWT token claims (nameid / sub) so pages that
+      // need it (e.g. DoctorSchedule) can read it from user.id.
+      if (!rawData.id && !rawData.userId) {
+        const tokenId = authService.getCurrentUserIdFromToken();
+        if (tokenId) {
+          rawData.id = tokenId;
+          rawData.userId = tokenId;
+        }
+      }
+      const userData = normalizeBackendUser(rawData);
       // Store user data in memory and localStorage
       setUser(userData);
       try {

@@ -45,6 +45,7 @@ export interface Doctor extends User {
   availableSlots: TimeSlot[];
   workingDays: string[];
   schedule?: WeeklySchedule;
+  isActive?: boolean;
 }
 
 export interface Admin extends User {

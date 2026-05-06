@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, MailCheck } from "lucide-react";
 import { toast } from "sonner";
 
 export default function RegisterPage() {
@@ -24,6 +24,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [emailSent, setEmailSent] = useState(false);
 
   const { register } = useAuth();
   const navigate = useNavigate();
@@ -103,12 +104,53 @@ export default function RegisterPage() {
         error instanceof Error
           ? error.message
           : "Registration failed. Please try again.";
+
+      // Backend requires email confirmation — registration succeeded but no token issued
+      if (
+        errorMessage.toLowerCase().includes("check your email") ||
+        errorMessage.toLowerCase().includes("confirm your account")
+      ) {
+        setEmailSent(true);
+        return;
+      }
+
       toast.error(errorMessage);
       console.error("Registration error:", error);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Email-confirmation waiting screen
+  if (emailSent) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-background">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-md w-full bg-card border border-border rounded-2xl p-8 shadow-card text-center"
+        >
+          <MailCheck className="w-14 h-14 text-primary mx-auto mb-4" />
+          <h1 className="font-display text-2xl font-bold text-foreground">
+            Check your email
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">
+            We sent a confirmation link to{" "}
+            <span className="font-medium text-foreground">
+              {formData.email}
+            </span>
+            . Open it to activate your account, then sign in.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Didn't receive it? Check your spam folder or try registering again.
+          </p>
+          <Button asChild className="mt-6 w-full gradient-bg border-0">
+            <Link to="/login">Back to Sign In</Link>
+          </Button>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">

@@ -42,7 +42,8 @@ function CheckoutForm({ appointmentId, onSuccess }: CheckoutFormProps) {
   useEffect(() => {
     const createPaymentIntent = async () => {
       try {
-        const token = localStorage.getItem("token");
+        // ✅ التعديل: استخدام "auth_token" بدل "token"
+        const token = localStorage.getItem("auth_token");
         const res = await fetch(`${BASE_URL}/api/Payment/create`, {
           method: "POST",
           headers: {
@@ -192,9 +193,10 @@ function CheckoutForm({ appointmentId, onSuccess }: CheckoutFormProps) {
   );
 }
 
+// ✅ التعديل: onPaymentSuccess بتستقبل paymentIntentId
 interface DepositPageProps {
   appointmentId: number;
-  onPaymentSuccess: () => void;
+  onPaymentSuccess: (paymentIntentId: string) => void;
   onBack: () => void;
 }
 
@@ -206,10 +208,11 @@ export default function DepositPage({
   const [paid, setPaid] = useState(false);
   const [paymentId, setPaymentId] = useState<string | null>(null);
 
+  // ✅ التعديل: بيبعت الـ paymentIntentId للـ parent
   const handleSuccess = (pi: { id: string; status: string }) => {
     setPaymentId(pi.id);
     setPaid(true);
-    onPaymentSuccess();
+    onPaymentSuccess(pi.id);
   };
 
   return (
@@ -312,7 +315,6 @@ export default function DepositPage({
   );
 }
 
-// Using CSSProperties to satisfy TypeScript
 const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
@@ -465,6 +467,7 @@ const styles: Record<string, CSSProperties> = {
     border: "3px solid #1e2d40",
     borderTop: "3px solid #00c896",
     borderRadius: "50%",
+    animation: "spin 1s linear infinite",
   },
   spinnerSmall: {
     display: "inline-block",
@@ -473,6 +476,7 @@ const styles: Record<string, CSSProperties> = {
     border: "2px solid rgba(10,22,40,0.3)",
     borderTop: "2px solid #0a1628",
     borderRadius: "50%",
+    animation: "spin 1s linear infinite",
   },
   backBtn: {
     background: "transparent",

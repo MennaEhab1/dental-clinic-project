@@ -937,6 +937,51 @@ export const authService = {
       );
     }
 
+    // 4. Match the logged-in user's name against the public /api/Lookup/Doctors list.
+    //    NOTE: DoctorDTO has no email field (confirmed from Swagger), so we match by name only.
+    try {
+      const storedUserRaw = localStorage.getItem("auth_user");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const storedUser: any = storedUserRaw ? JSON.parse(storedUserRaw) : null;
+      const currentUserName: string = (storedUser?.userName ?? "")
+        .toLowerCase()
+        .trim();
+      if (currentUserName) {
+        const lookupRes = await apiCall<unknown[]>("/api/Lookup/Doctors", {
+          method: "GET",
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doctors: any[] = Array.isArray(lookupRes.data)
+          ? lookupRes.data
+          : [];
+        const match = doctors.find((d) => {
+          const docName = (d.name ?? d.fullName ?? "").toLowerCase().trim();
+          return (
+            docName === currentUserName ||
+            docName.includes(currentUserName) ||
+            currentUserName.includes(docName)
+          );
+        });
+        if (match) {
+          const idFromLookup = Number(
+            match.id ?? match.doctorId ?? match.dentistId,
+          );
+          if (Number.isFinite(idFromLookup) && idFromLookup > 0) {
+            console.debug(
+              "[resolveCurrentDoctorId] Found doctor ID from Lookup/Doctors by name:",
+              idFromLookup,
+            );
+            return idFromLookup;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[resolveCurrentDoctorId] Lookup/Doctors fallback failed:",
+        e,
+      );
+    }
+
     return null;
   },
 
@@ -2309,16 +2354,34 @@ export const appointmentService = {
     // Extract numeric patient ID
     let patientId: number | undefined;
     const patientIdStr = data.patientId?.toString() ?? "";
-    if (patientIdStr && !isNaN(Number(patientIdStr))) {
+    if (
+      patientIdStr &&
+      !isNaN(Number(patientIdStr)) &&
+      Number(patientIdStr) > 0
+    ) {
       patientId = Number(patientIdStr);
-    } else {
-      const numericMatch = patientIdStr.match(/\d+/);
-      if (numericMatch) patientId = Number(numericMatch[0]);
+    }
+    // Fallback: read numeric PatientId from the JWT token.
+    // Do NOT use a regex to extract digits from a GUID — that produces a
+    // wrong numeric ID (e.g., "1" extracted from "a1b2c3d4-…") and causes
+    // the backend to link the appointment to the wrong patient, which then
+    // makes the payment intent fail with "Cannot read properties of
+    // undefined (reading 'patientId')".
+    if (patientId === undefined) {
+      const rawTok = localStorage.getItem("auth_token");
+      const cleanTok = rawTok?.replace(/^Bearer\s+/i, "") ?? null;
+      const tokenPatId = extractPatientIdFromToken(cleanTok);
+      if (tokenPatId && !isNaN(Number(tokenPatId)) && Number(tokenPatId) > 0) {
+        patientId = Number(tokenPatId);
+      }
     }
 
-    // Build date as ISO date-time (date part only, midnight UTC)
+    // Build date as local ISO date-time string (no UTC conversion).
+    // Using .toISOString() would shift midnight local time backwards into the
+    // previous UTC day for Egypt (UTC+2/+3), causing the backend to see the
+    // wrong date and reject with "Doctor is not available on this day".
     const dateIso = data.date
-      ? new Date(`${data.date}T00:00:00`).toISOString()
+      ? `${data.date}T00:00:00`
       : new Date().toISOString();
 
     // Build startTime as time-span string "HH:mm:ss"
@@ -2333,11 +2396,13 @@ export const appointmentService = {
       doctorId,
       date: dateIso,
       startTime,
-      amount: 0,
+      // Use the service price passed through from the caller (via extra field on data).
+      // Fall back to 0 only if no price is available — a 0-amount PaymentIntent
+      // will be rejected by Stripe and cause a 500 on the payment endpoint.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      amount: (data as any).price ?? (data as any).amount ?? 0,
       paymentMethod: "Cash",
-      // Backend [Required] rejects null; send a placeholder for Cash bookings.
-      // Once backend removes the [Required] attribute this can be set to null.
-      paymentIntentId: "CASH_PAYMENT",
+      paymentIntentId: null,
     };
 
     if (patientId !== undefined) dto.patientId = patientId;
@@ -2356,9 +2421,48 @@ export const appointmentService = {
       body: JSON.stringify(dto),
     });
 
-    const appointmentData = res.data || {};
+    // Backend may return: a plain object { id: 5, ... }, { appointmentId: 5, ... },
+    // a plain integer (the new appointment ID), a message string, or an empty body.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw: any = res.data;
+    console.debug("[appointmentService.create] Raw backend response:", {
+      raw,
+      rawType: typeof raw,
+      rawJSON: JSON.stringify(raw),
+    });
+
+    const appointmentData = raw && typeof raw === "object" ? raw : {};
+
+    // Extract raw numeric ID — check every plausible field name.
+    let rawId: number | null = null;
+    if (typeof raw === "number" && raw > 0) {
+      rawId = raw;
+    } else if (typeof appointmentData === "object") {
+      const candidate =
+        appointmentData.id ??
+        appointmentData.appointmentId ??
+        appointmentData.appointmentID ??
+        appointmentData.Id ??
+        appointmentData.AppointmentId;
+      if (
+        candidate != null &&
+        !isNaN(Number(candidate)) &&
+        Number(candidate) > 0
+      ) {
+        rawId = Number(candidate);
+      }
+    }
+
+    console.debug("[appointmentService.create] Extracted rawId:", rawId);
+
+    const mapped = appointmentService.mapBackendToAppointment(
+      appointmentData,
+      data,
+    );
+    if (rawId) mapped.id = String(rawId);
+
     return {
-      data: appointmentService.mapBackendToAppointment(appointmentData, data),
+      data: mapped,
       success: true,
       message: "Appointment booked successfully",
     };
@@ -2416,6 +2520,15 @@ export const appointmentService = {
         date = egyptDateTime.date;
         time = egyptDateTime.time;
       }
+    }
+
+    // Prefer the dedicated startTime field from the backend (e.g. "09:00:00")
+    // over the time derived from the date column (which is often stored as T00:00:00).
+    const rawStartTime: string =
+      item.startTime || item.start_time || item.StartTime || "";
+    if (rawStartTime) {
+      // Normalise "HH:mm:ss" or "HH:mm" → "HH:mm"
+      time = rawStartTime.substring(0, 5);
     }
 
     // Extract doctor info - handle nested doctor object
@@ -3636,7 +3749,7 @@ export const notificationService = {
 
 export interface DoctorSchedule {
   id?: number;
-  doctorId: number;
+  doctorId?: number;
   dayOfWeek: string;
   startTime: string;
   endTime: string;
@@ -3645,18 +3758,21 @@ export interface DoctorSchedule {
 
 /**
  * Doctor Schedule Management
- * GET /api/DoctorSchedule/{doctorId}
- * GET /api/DoctorSchedule/{doctorId}/available-slots?date=...
+ * GET /api/DoctorSchedule?doctorId=  — doctorId optional; falls back to JWT on backend
+ * GET /api/DoctorSchedule/available-slots?date=&doctorId=  — same
  * POST /api/DoctorSchedule
  */
 export const doctorScheduleService = {
   /**
-   * Get a doctor's weekly schedule
-   * GET /api/DoctorSchedule/{doctorId}
+   * Get a doctor's weekly schedule.
+   * Pass doctorId when fetching another doctor's schedule (e.g. booking page).
+   * Omit it when the logged-in doctor is fetching their own schedule (JWT-resolved on backend).
+   * GET /api/DoctorSchedule?doctorId={id}
    */
-  async getSchedule(doctorId: string): Promise<ApiResponse<DoctorSchedule[]>> {
+  async getSchedule(doctorId?: string): Promise<ApiResponse<DoctorSchedule[]>> {
     try {
-      const res = await apiCall<unknown>(`/api/DoctorSchedule/${doctorId}`, {
+      const query = doctorId ? `?doctorId=${doctorId}` : "";
+      const res = await apiCall<unknown>(`/api/DoctorSchedule${query}`, {
         method: "GET",
       });
       // API returns { value: DoctorSchedule[], Count: number } or a plain array
@@ -3666,14 +3782,25 @@ export const doctorScheduleService = {
         : ((raw as { value?: DoctorSchedule[] }).value ?? []);
       return { data: scheduleArray, success: true };
     } catch (error) {
+      const msg = error instanceof Error ? error.message.toLowerCase() : "";
+      // 404 = no schedule entries yet — valid empty state, not a service failure
+      if (
+        msg.includes("no schedule") ||
+        msg.includes("not found") ||
+        msg.includes("404")
+      ) {
+        return { data: [], success: true };
+      }
       console.error("[doctorScheduleService.getSchedule] Error:", error);
       return { data: [], success: false };
     }
   },
 
   /**
-   * Get available time slots for a doctor on a given date
-   * GET /api/DoctorSchedule/{doctorId}/available-slots?date=YYYY-MM-DDTHH:mm:ss
+   * Get available time slots for a doctor on a given date.
+   * Pass doctorId when called from the booking page (patient flow).
+   * Omit it when the logged-in doctor is checking their own slots (JWT-resolved on backend).
+   * GET /api/DoctorSchedule/available-slots?date=YYYY-MM-DD&doctorId={id}
    * Backend returns: Array<{ date: string; startTime: string; endTime: string; isAvailable: boolean }>
    * We extract startTime strings for available slots only.
    */
@@ -3682,19 +3809,21 @@ export const doctorScheduleService = {
     date: string,
   ): Promise<ApiResponse<string[]>> {
     try {
-      // Backend expects full ISO date-time (format: date-time per Swagger).
-      // Sending just YYYY-MM-DD causes the backend to skip appointment cross-checking,
-      // so all slots come back as isAvailable: true even when booked.
+      // Send plain YYYY-MM-DD — the full datetime suffix (T00:00:00) was causing
+      // the backend to return 500. The backend query-param is typed as date-time in
+      // Swagger but it accepts a date-only string in practice.
       const datePart = date.includes("T") ? date.split("T")[0] : date;
-      const isoDateTime = `${datePart}T00:00:00`;
       type SlotItem = {
         date: string;
         startTime: string;
         endTime: string;
         isAvailable: boolean;
       };
+      // Pass doctorId as query param so the backend can find the right doctor's schedule.
+      // The backend falls back to JWT when doctorId is absent.
+      const doctorQuery = doctorId ? `&doctorId=${doctorId}` : "";
       const res = await apiCall<unknown>(
-        `/api/DoctorSchedule/${doctorId}/available-slots?date=${encodeURIComponent(isoDateTime)}`,
+        `/api/DoctorSchedule/available-slots?date=${datePart}${doctorQuery}`,
         { method: "GET" },
       );
       // API returns { value: SlotItem[], Count: number } or a plain array
@@ -3716,6 +3845,16 @@ export const doctorScheduleService = {
         .map((s) => (s.startTime as string).slice(0, 5));
       return { data: slots, success: true };
     } catch (error) {
+      const msg = error instanceof Error ? error.message.toLowerCase() : "";
+      // 404 = doctor has no schedule for that day — valid "no slots" response, not a service failure.
+      // Return success with empty array so the UI shows "No available slots" instead of an error banner.
+      if (
+        msg.includes("no schedule") ||
+        msg.includes("not found") ||
+        msg.includes("404")
+      ) {
+        return { data: [], success: true };
+      }
       console.error("[doctorScheduleService.getAvailableSlots] Error:", error);
       return { data: [], success: false };
     }
@@ -3737,8 +3876,9 @@ export const doctorScheduleService = {
         message: "Schedule created successfully",
       };
     } catch (error) {
-      console.error("[doctorScheduleService.create] Error:", error);
-      return { data: {} as DoctorSchedule, success: false };
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("[doctorScheduleService.create] Error:", message, error);
+      return { data: {} as DoctorSchedule, success: false, message };
     }
   },
 };

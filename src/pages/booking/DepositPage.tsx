@@ -7,7 +7,9 @@ import {
   useElements,
 } from "@stripe/react-stripe-js";
 
-const stripePromise = loadStripe("pk_test_51TOkagLoiZyxnlGRqwSWZUL2KTbJYHtExgYdcBaMfoABgDMLUXr2wWmtUmuGNznzdRjPzBOxYNZFsGyZ5TZz9oyZ00Ead5PZnc");
+const stripePromise = loadStripe(
+  "pk_test_51TOkagLoiZyxnlGRqwSWZUL2KTbJYHtExgYdcBaMfoABgDMLUXr2wWmtUmuGNznzdRjPzBOxYNZFsGyZ5TZz9oyZ00Ead5PZnc",
+);
 
 const BASE_URL = "https://smart-teeth-care.runasp.net";
 
@@ -25,105 +27,137 @@ const CARD_ELEMENT_OPTIONS = {
 };
 
 interface CheckoutFormProps {
-  appointmentId: number;
-  onSuccess: (paymentIntent: { id: string; status: string }) => void;
+  depositAmount: number | undefined;
+  // null = appointment not yet created; non-null = reuse this ID on every retry
+  pendingAppointmentId: number | null;
+  createAppointmentAndGetId: () => Promise<number>;
+  onAppointmentCreated: (id: number) => void;
+  onSuccess: (
+    paymentIntent: { id: string; status: string },
+    appointmentId: number,
+  ) => void;
 }
 
-function CheckoutForm({ appointmentId, onSuccess }: CheckoutFormProps) {
+function CheckoutForm({
+  depositAmount,
+  pendingAppointmentId,
+  createAppointmentAndGetId,
+  onAppointmentCreated,
+  onSuccess,
+}: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [depositAmount, setDepositAmount] = useState<number | null>(null);
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [fetchingIntent, setFetchingIntent] = useState(true);
-
-  useEffect(() => {
-    const createPaymentIntent = async () => {
-      try {
-        // ✅ التعديل: استخدام "auth_token" بدل "token"
-        const token = localStorage.getItem("auth_token");
-        const res = await fetch(`${BASE_URL}/api/Payment/create`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ appointmentId }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(
-            (errData as { message?: string }).message ||
-              "Failed to create payment intent"
-          );
-        }
-
-        const data = await res.json() as {
-          clientSecret: string;
-          amount?: number;
-          depositAmount?: number;
-        };
-
-        setClientSecret(data.clientSecret);
-        setDepositAmount(data.amount ?? data.depositAmount ?? null);
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Something went wrong. Please try again."
-        );
-      } finally {
-        setFetchingIntent(false);
-      }
-    };
-
-    if (appointmentId) createPaymentIntent();
-  }, [appointmentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stripe || !elements || !clientSecret) return;
+    if (!stripe || !elements) return;
 
     setLoading(true);
     setError(null);
 
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) return;
+    try {
+      // Step 1: Create the appointment exactly once for this deposit session.
+      // On every retry the same appointment ID is reused — we never cancel and
+      // recreate because that causes "slot already booked" race conditions.
+      // The slot stays claimed by this session until the user clicks Back.
+      let apptId = pendingAppointmentId;
+      if (apptId === null) {
+        apptId = await createAppointmentAndGetId();
+        onAppointmentCreated(apptId);
+      }
 
-    const { error: stripeError, paymentIntent } =
-      await stripe.confirmCardPayment(clientSecret, {
-        payment_method: { card: cardElement },
+      // Step 2: Create a Stripe payment intent for this appointment.
+      // Safe to call multiple times — each call gets a fresh clientSecret.
+      const rawToken = localStorage.getItem("auth_token");
+      const token = rawToken?.replace(/^Bearer\s+/i, "") ?? "";
+
+      let patientIdForPayment: number | undefined;
+      try {
+        const claims = JSON.parse(atob(token.split(".")[1]));
+        const raw = claims.PatientId ?? claims.patientId;
+        if (raw != null && !isNaN(Number(raw)) && Number(raw) > 0) {
+          patientIdForPayment = Number(raw);
+        }
+      } catch {
+        /* ignore – token may be absent or malformed */
+      }
+
+      const res = await fetch(`${BASE_URL}/api/Payment/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          appointmentId: apptId,
+          ...(patientIdForPayment !== undefined
+            ? { patientId: patientIdForPayment }
+            : {}),
+        }),
       });
 
-    if (stripeError) {
-      setError(stripeError.message ?? "Payment failed");
-      setLoading(false);
-      return;
-    }
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        let errMessage = `Payment setup failed (HTTP ${res.status})`;
+        try {
+          const errData = JSON.parse(errText) as Record<string, unknown>;
+          errMessage =
+            (errData.message as string) ||
+            (errData.title as string) ||
+            (errData.detail as string) ||
+            (typeof errData.errors === "object"
+              ? JSON.stringify(errData.errors)
+              : "") ||
+            errMessage;
+        } catch {
+          if (errText) errMessage = errText;
+        }
+        throw new Error(errMessage);
+      }
 
-    if (paymentIntent?.status === "succeeded") {
-      onSuccess(paymentIntent);
-    } else {
-      setError("Payment was not completed. Please try again.");
+      const data = (await res.json()) as {
+        clientSecret: string;
+        amount?: number;
+        depositAmount?: number;
+      };
+
+      // Step 3: Confirm the card payment.
+      const cardElement = elements.getElement(CardElement);
+      if (!cardElement)
+        throw new Error("Card form not ready. Please refresh and try again.");
+
+      const { error: stripeError, paymentIntent } =
+        await stripe.confirmCardPayment(data.clientSecret, {
+          payment_method: { card: cardElement },
+        });
+
+      if (stripeError) throw new Error(stripeError.message ?? "Payment failed");
+
+      if (paymentIntent?.status === "succeeded") {
+        onSuccess(paymentIntent, apptId);
+      } else {
+        throw new Error("Payment was not completed. Please try again.");
+      }
+    } catch (err) {
+      // Do NOT cancel the appointment on payment failure.
+      // The slot stays claimed so the next retry can reuse the same appointment
+      // without hitting a "slot already booked" conflict.
+      // Cancellation only happens when the user explicitly clicks Back.
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again.",
+      );
       setLoading(false);
     }
   };
 
-  if (fetchingIntent) {
-    return (
-      <div style={styles.centered}>
-        <div style={styles.spinner} />
-        <p style={styles.loadingText}>Preparing your payment...</p>
-      </div>
-    );
-  }
-
   return (
     <form onSubmit={handleSubmit} style={styles.form}>
-      {depositAmount !== null && (
+      {depositAmount != null && (
         <div style={styles.amountBox}>
           <span style={styles.amountLabel}>Deposit amount</span>
           <span style={styles.amountValue}>${depositAmount}</span>
@@ -138,27 +172,29 @@ function CheckoutForm({ appointmentId, onSuccess }: CheckoutFormProps) {
       </div>
 
       {error && (
-        <div style={styles.errorBox}>
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            style={{ flexShrink: 0 }}
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span>{error}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={styles.errorBox}>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              style={{ flexShrink: 0 }}
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>{error}</span>
+          </div>
         </div>
       )}
 
       <button
         type="submit"
-        disabled={!stripe || loading || fetchingIntent}
+        disabled={!stripe || loading}
         style={{
           ...styles.payBtn,
           opacity: !stripe || loading ? 0.6 : 1,
@@ -193,74 +229,123 @@ function CheckoutForm({ appointmentId, onSuccess }: CheckoutFormProps) {
   );
 }
 
-// ✅ التعديل: onPaymentSuccess بتستقبل paymentIntentId
 interface DepositPageProps {
-  appointmentId: number;
-  onPaymentSuccess: (paymentIntentId: string) => void;
+  depositAmount: number | undefined;
+  createAppointmentAndGetId: () => Promise<number>;
+  onPaymentSuccess: (appointmentId: number) => void;
   onBack: () => void;
 }
 
 export default function DepositPage({
-  appointmentId,
+  depositAmount,
+  createAppointmentAndGetId,
   onPaymentSuccess,
   onBack,
 }: DepositPageProps) {
   const [paid, setPaid] = useState(false);
   const [paymentId, setPaymentId] = useState<string | null>(null);
+  // Created once on first Pay-click; reused on retries; cancelled on Back/unmount.
+  const [pendingAppointmentId, setPendingAppointmentId] = useState<
+    number | null
+  >(null);
 
-  // ✅ التعديل: بيبعت الـ paymentIntentId للـ parent
-  const handleSuccess = (pi: { id: string; status: string }) => {
+  // Refs so the cleanup effects can read the latest values without stale closures.
+  const pendingIdRef = useRef<number | null>(null);
+  const paymentDoneRef = useRef(false);
+
+  useEffect(() => {
+    pendingIdRef.current = pendingAppointmentId;
+  }, [pendingAppointmentId]);
+
+  // Cancel the appointment if the user navigates away mid-payment (browser back,
+  // tab close, React Router navigation) before the payment succeeds.
+  useEffect(() => {
+    return () => {
+      if (pendingIdRef.current !== null && !paymentDoneRef.current) {
+        const rawToken = localStorage.getItem("auth_token");
+        const token = rawToken?.replace(/^Bearer\s+/i, "") ?? "";
+        fetch(
+          `${BASE_URL}/api/PatientAppointment/CancelAppointment/${pendingIdRef.current}`,
+          { method: "PATCH", headers: { Authorization: `Bearer ${token}` } },
+        ).catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleSuccess = (
+    pi: { id: string; status: string },
+    appointmentId: number,
+  ) => {
+    paymentDoneRef.current = true; // prevent unmount cleanup from cancelling
     setPaymentId(pi.id);
     setPaid(true);
-    onPaymentSuccess(pi.id);
+    setPendingAppointmentId(null);
+    onPaymentSuccess(appointmentId);
+  };
+
+  const handleBack = async () => {
+    if (pendingAppointmentId !== null) {
+      const rawToken = localStorage.getItem("auth_token");
+      const token = rawToken?.replace(/^Bearer\s+/i, "") ?? "";
+      // Await the cancel so the slot is freed before the booking page reloads slots.
+      await fetch(
+        `${BASE_URL}/api/PatientAppointment/CancelAppointment/${pendingAppointmentId}`,
+        { method: "PATCH", headers: { Authorization: `Bearer ${token}` } },
+      ).catch(() => {});
+      setPendingAppointmentId(null);
+    }
+    onBack();
   };
 
   return (
     <div style={styles.page}>
       <div style={styles.progressBar}>
-        {["Service", "Doctor", "Date & Time", "Details", "Deposit", "Confirm"].map(
-          (step, i) => {
-            const active = i === 4;
-            const done = i < 4;
-            return (
-              <div key={step} style={styles.progressItem}>
-                <div
-                  style={{
-                    ...styles.progressDot,
-                    background: done || active ? "#00c896" : "#2a3a4a",
-                    border: active ? "2px solid #00c896" : "none",
-                    boxShadow: active
-                      ? "0 0 0 4px rgba(0,200,150,0.15)"
-                      : "none",
-                  }}
-                >
-                  {done && (
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="#0a1628"
-                      strokeWidth="3"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  )}
-                </div>
-                <span
-                  style={{
-                    ...styles.progressLabel,
-                    color: active ? "#00c896" : done ? "#ffffff" : "#566a7f",
-                    fontWeight: active ? 600 : 400,
-                  }}
-                >
-                  {step}
-                </span>
-                {i < 5 && <div style={styles.progressLine} />}
+        {[
+          "Service",
+          "Doctor",
+          "Date & Time",
+          "Details",
+          "Deposit",
+          "Confirm",
+        ].map((step, i) => {
+          const active = i === 4;
+          const done = i < 4;
+          return (
+            <div key={step} style={styles.progressItem}>
+              <div
+                style={{
+                  ...styles.progressDot,
+                  background: done || active ? "#00c896" : "#2a3a4a",
+                  border: active ? "2px solid #00c896" : "none",
+                  boxShadow: active ? "0 0 0 4px rgba(0,200,150,0.15)" : "none",
+                }}
+              >
+                {done && (
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="#0a1628"
+                    strokeWidth="3"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
               </div>
-            );
-          }
-        )}
+              <span
+                style={{
+                  ...styles.progressLabel,
+                  color: active ? "#00c896" : done ? "#ffffff" : "#566a7f",
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                {step}
+              </span>
+              {i < 5 && <div style={styles.progressLine} />}
+            </div>
+          );
+        })}
       </div>
 
       <div style={styles.card}>
@@ -280,8 +365,8 @@ export default function DepositPage({
             </div>
             <h2 style={styles.successTitle}>Deposit Paid Successfully!</h2>
             <p style={styles.successSub}>
-              Your appointment is confirmed. A confirmation will be sent to
-              your email.
+              Your appointment is confirmed. A confirmation will be sent to your
+              email.
             </p>
             {paymentId && (
               <p style={styles.successId}>
@@ -300,12 +385,15 @@ export default function DepositPage({
 
             <Elements stripe={stripePromise}>
               <CheckoutForm
-                appointmentId={appointmentId}
+                depositAmount={depositAmount}
+                pendingAppointmentId={pendingAppointmentId}
+                createAppointmentAndGetId={createAppointmentAndGetId}
+                onAppointmentCreated={setPendingAppointmentId}
                 onSuccess={handleSuccess}
               />
             </Elements>
 
-            <button onClick={onBack} style={styles.backBtn}>
+            <button onClick={handleBack} style={styles.backBtn}>
               ← Back
             </button>
           </>

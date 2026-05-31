@@ -111,23 +111,15 @@ export default function DoctorSchedulePage() {
         setIsLoading(false);
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep a stable ref so the schedule-fetch effect reads the latest resolvedDoctorId
-  const doctorIdRef = useRef(resolvedDoctorId);
-  doctorIdRef.current = resolvedDoctorId;
-
+  // Fetch schedule on mount and on manual refresh.
+  // Backend resolves doctor identity from JWT — no numeric doctorId needed for GET.
   useEffect(() => {
-    const id = doctorIdRef.current;
-    if (!id) {
-      // resolvedDoctorId not yet available — wait for it
-      return;
-    }
     let cancelled = false;
     setIsLoading(true);
     doctorScheduleService
-      .getSchedule(String(id))
+      .getSchedule()
       .then((res) => {
         if (!cancelled) setSchedule(res.data || []);
       })
@@ -145,9 +137,7 @@ export default function DoctorSchedulePage() {
     return () => {
       cancelled = true;
     };
-    // refreshKey triggers manual refresh; resolvedDoctorId triggers initial load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, resolvedDoctorId]);
+  }, [refreshKey]);
 
   const fetchSchedule = () => setRefreshKey((k) => k + 1);
 
@@ -166,9 +156,6 @@ export default function DoctorSchedulePage() {
   };
 
   const handleSubmit = async () => {
-    // Use resolved ID or 0 — backend resolves from JWT when doctorId is 0/missing
-    const doctorIdNum = resolvedDoctorId ?? 0;
-
     const slotDuration = Number(form.slotDurationMinutes);
     if (!slotDuration || slotDuration < 5) {
       toast({
@@ -192,7 +179,9 @@ export default function DoctorSchedulePage() {
     setIsSubmitting(true);
     try {
       const payload: DoctorSchedule = {
-        doctorId: doctorIdNum,
+        // Only include doctorId when resolved; omit it so the backend
+        // can infer the doctor identity from the JWT token instead.
+        ...(resolvedDoctorId ? { doctorId: resolvedDoctorId } : {}),
         dayOfWeek: form.dayOfWeek,
         startTime: `${form.startTime}:00`, // backend expects HH:mm:ss
         endTime: `${form.endTime}:00`,
@@ -211,7 +200,8 @@ export default function DoctorSchedulePage() {
       } else {
         toast({
           title: "Failed to save schedule",
-          description: "Backend rejected the request. Please try again.",
+          description:
+            res.message || "Backend rejected the request. Please try again.",
           variant: "destructive",
         });
       }

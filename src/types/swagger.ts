@@ -4,10 +4,14 @@
 export type ApiAppointmentStatus = 0 | 1 | 2 | 3 | 4;
 
 export interface BookAppointmentDto {
-  dentistId: number;
-  appointmentDate: string; // date-time
-  serviceId?: number | string | null;
-  notes?: string | null;
+  doctorId: number;
+  patientId?: number | null;
+  date: string; // date-time
+  startTime: string; // date-span "HH:mm:ss"
+  amount: number;
+  paymentMethod?: string | null;
+  createdByAdmin?: boolean;
+  paymentIntentId?: string | null;
 }
 
 export interface LoginDTO {

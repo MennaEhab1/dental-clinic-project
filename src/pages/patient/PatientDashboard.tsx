@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AppointmentCard } from "@/components/appointments/AppointmentCard";
@@ -31,7 +31,33 @@ export default function PatientDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const { user, isLoading: authIsLoading } = useAuth();
 
-  const fetchAppointments = async () => {
+  const getAppointmentTimestamp = (appointment: Appointment): number => {
+    const dateValue = String(appointment.date || "").trim();
+    const timeValue = String(appointment.time || "").trim();
+    if (!dateValue) return 0;
+
+    const normalizedTime = /^\d{2}:\d{2}$/.test(timeValue)
+      ? `${timeValue}:00`
+      : timeValue || "00:00:00";
+
+    const parsed = new Date(`${dateValue}T${normalizedTime}`);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
+
+    const parsedDateOnly = new Date(dateValue);
+    return Number.isNaN(parsedDateOnly.getTime()) ? 0 : parsedDateOnly.getTime();
+  };
+
+  const formatAppointmentDate = (appointment: Appointment): string => {
+    const timestamp = getAppointmentTimestamp(appointment);
+    if (!timestamp) return "Date unavailable";
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const fetchAppointments = useCallback(async () => {
     // Only fetch if auth is loaded and user is authenticated
     if (authIsLoading) {
       // Still loading auth state, don't fetch yet
@@ -61,12 +87,12 @@ export default function PatientDashboard() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [authIsLoading, user]);
 
   // Fetch on mount and when user changes
   useEffect(() => {
     fetchAppointments();
-  }, [user, authIsLoading]);
+  }, [fetchAppointments]);
 
   // Listen for appointment refresh events (from booking page)
   useEffect(() => {
@@ -97,38 +123,53 @@ export default function PatientDashboard() {
       window.removeEventListener("appointments:refresh", handleRefresh);
       window.removeEventListener("storage", handleStorageChange);
     };
-  }, [user, authIsLoading]);
+  }, [fetchAppointments]);
 
-  // Helper function to check if appointment is in the past
-  const isAppointmentPast = (appointmentDate: string): boolean => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const apptDate = new Date(appointmentDate);
-    apptDate.setHours(0, 0, 0, 0);
-    return apptDate < today;
-  };
+  const upcomingAppointments = useMemo(
+    () =>
+      appointments
+        .filter((appointment) => appointment.status === "upcoming")
+        .sort(
+          (a, b) => getAppointmentTimestamp(a) - getAppointmentTimestamp(b),
+        ),
+    [appointments],
+  );
 
-  // Filter appointments by date and status
-  const upcomingCount = appointments.filter((a) => {
-    const isPast = isAppointmentPast(a.date);
-    return !isPast && a.status === "upcoming";
-  }).length;
+  const completedAppointments = useMemo(
+    () =>
+      appointments
+        .filter((appointment) => appointment.status === "complete")
+        .sort(
+          (a, b) => getAppointmentTimestamp(b) - getAppointmentTimestamp(a),
+        ),
+    [appointments],
+  );
 
-  const completedCount = appointments.filter((a) => {
-    const isPast = isAppointmentPast(a.date);
-    return isPast || a.status === "complete";
-  }).length;
-
+  const upcomingCount = upcomingAppointments.length;
+  const completedCount = completedAppointments.length;
   const cancelledCount = appointments.filter(
-    (a) => a.status === "cancelled",
+    (appointment) => appointment.status === "cancelled",
   ).length;
+  const lastVisit = completedAppointments[0];
 
-  const lastVisit = appointments
-    .filter((a) => {
-      const isPast = isAppointmentPast(a.date);
-      return isPast && a.status === "complete";
-    })
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+  const lastVisitDoctorName = lastVisit
+    ? [lastVisit.doctor?.firstName, lastVisit.doctor?.lastName]
+        .filter(Boolean)
+        .join(" ")
+        .trim() || "Unknown Doctor"
+    : "";
+  const lastVisitDoctorSpecialty = lastVisit?.doctor?.specialty
+    ? lastVisit.doctor.specialty.replace("-", " ")
+    : "General Dentistry";
+  const lastVisitServiceName =
+    lastVisit?.service?.name || "Dental Appointment";
+  const lastVisitNotes = String(lastVisit?.notes || "").trim();
+  const lastVisitInitials = lastVisitDoctorName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("");
 
   const stats = [
     {
@@ -154,7 +195,7 @@ export default function PatientDashboard() {
     },
     {
       label: "Messages",
-      value: 3,
+      value: 0,
       icon: MessageSquare,
       color: "text-accent",
       bg: "bg-accent/10",
@@ -223,16 +264,9 @@ export default function PatientDashboard() {
             <CardContent>
               {isLoading ? (
                 <LoadingCard />
-              ) : appointments.filter((a) => {
-                  const isPast = isAppointmentPast(a.date);
-                  return !isPast && a.status === "upcoming";
-                }).length > 0 ? (
+              ) : upcomingAppointments.length > 0 ? (
                 <div className="space-y-3">
-                  {appointments
-                    .filter((a) => {
-                      const isPast = isAppointmentPast(a.date);
-                      return !isPast && a.status === "upcoming";
-                    })
+                  {upcomingAppointments
                     .slice(0, 3)
                     .map((appointment) => (
                       <AppointmentCard
@@ -261,18 +295,14 @@ export default function PatientDashboard() {
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={lastVisit.doctor?.avatar} />
-                      <AvatarFallback>
-                        {lastVisit.doctor?.firstName[0]}
-                        {lastVisit.doctor?.lastName[0]}
-                      </AvatarFallback>
+                      <AvatarFallback>{lastVisitInitials || "DR"}</AvatarFallback>
                     </Avatar>
                     <div>
                       <p className="font-medium text-foreground text-sm">
-                        Dr. {lastVisit.doctor?.firstName}{" "}
-                        {lastVisit.doctor?.lastName}
+                        Dr. {lastVisitDoctorName}
                       </p>
                       <p className="text-xs text-muted-foreground capitalize">
-                        {lastVisit.doctor?.specialty.replace("-", " ")}
+                        {lastVisitDoctorSpecialty}
                       </p>
                     </div>
                   </div>
@@ -280,23 +310,17 @@ export default function PatientDashboard() {
                     <div className="flex items-center gap-2 text-sm">
                       <Calendar className="w-3.5 h-3.5 text-primary" />
                       <span className="text-muted-foreground">
-                        {new Date(lastVisit.date).toLocaleDateString("en-US", {
-                          month: "long",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                        {formatAppointmentDate(lastVisit)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Stethoscope className="w-3.5 h-3.5 text-primary" />
-                      <span className="text-muted-foreground">
-                        {lastVisit.service?.name}
-                      </span>
+                      <span className="text-muted-foreground">{lastVisitServiceName}</span>
                     </div>
                   </div>
-                  {lastVisit.notes && (
+                  {lastVisitNotes && (
                     <p className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-lg">
-                      {lastVisit.notes}
+                      {lastVisitNotes}
                     </p>
                   )}
                 </div>
@@ -351,7 +375,7 @@ export default function PatientDashboard() {
                   My Profile
                 </h3>
                 <p className="text-xs text-muted-foreground">
-                  Update personal and insurance info.
+                  Update personal profile details and settings.
                 </p>
               </div>
             </Link>

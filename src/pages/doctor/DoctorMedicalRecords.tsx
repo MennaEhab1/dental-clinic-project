@@ -38,16 +38,39 @@ import {
 } from "lucide-react";
 import {
   doctorService,
+  medicalRecordService,
   pharmacyService,
   prescriptionService,
 } from "@/services/api";
-import type { MedicalRecord, Patient, Medicine } from "@/types";
+import type { Appointment, MedicalRecord, Patient, Medicine } from "@/types";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+
+function parseNumericId(value: string): number | null {
+  const direct = Number(value);
+  if (Number.isFinite(direct)) return direct;
+  const matched = value.match(/\d+/);
+  if (!matched) return null;
+  const parsed = Number(matched[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseDurationDays(value: string): number | null {
+  const direct = Number(value);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const matched = value.match(/\d+/);
+  if (!matched) return null;
+  const parsed = Number(matched[0]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 export default function DoctorMedicalRecords() {
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
+  const [latestAppointmentByPatient, setLatestAppointmentByPatient] = useState<
+    Record<string, Appointment>
+  >({});
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [patientFilter, setPatientFilter] = useState<string>("all");
@@ -74,6 +97,7 @@ export default function DoctorMedicalRecords() {
     duration: "",
     instructions: "",
   });
+  const { user } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -94,27 +118,107 @@ export default function DoctorMedicalRecords() {
         const patientMap = new Map(
           derivedPatients.map((item) => [item.id, item]),
         );
+        const appointmentById = new Map(
+          appointmentsRes.data.map((item) => [item.id, item]),
+        );
+        const computedLatestByPatient = appointmentsRes.data.reduce<
+          Record<string, Appointment>
+        >((acc, appointment) => {
+          const current = acc[appointment.patientId];
+          if (!current) {
+            acc[appointment.patientId] = appointment;
+            return acc;
+          }
+          if (
+            new Date(appointment.date).getTime() >
+            new Date(current.date).getTime()
+          ) {
+            acc[appointment.patientId] = appointment;
+          }
+          return acc;
+        }, {});
 
-        const mappedRecords: MedicalRecord[] = appointmentsRes.data.map(
-          (appointment) => ({
-            id: `record-${appointment.id}`,
-            patientId: appointment.patientId,
-            doctorId: appointment.doctorId,
-            doctor: appointment.doctor,
-            patient:
-              appointment.patient || patientMap.get(appointment.patientId),
-            date: appointment.date,
-            type: appointment.status === "complete" ? "treatment" : "note",
-            diagnosis: appointment.service?.name || "Dental consultation",
-            treatment: appointment.notes || "Follow-up and treatment plan",
-            notes: appointment.notes || "No additional notes.",
-            toothNumber: undefined,
-            attachments: [],
-            prescription: undefined,
+        const recordsByAppointment = new Map<string, MedicalRecord>();
+        const standaloneRecords: MedicalRecord[] = [];
+        const backendRecords = await Promise.all(
+          derivedPatients.map(async (patient) => {
+            try {
+              const response = await medicalRecordService.getByPatient(patient.id);
+              return response.data || [];
+            } catch {
+              return [] as MedicalRecord[];
+            }
           }),
         );
 
-        setRecords(mappedRecords);
+        backendRecords.flat().forEach((record) => {
+          const appointment = record.appointmentId
+            ? appointmentById.get(record.appointmentId)
+            : undefined;
+          const normalizedRecord: MedicalRecord = {
+            ...record,
+            patient: record.patient || patientMap.get(record.patientId),
+            doctor: record.doctor || appointment?.doctor,
+          };
+
+          if (normalizedRecord.appointmentId) {
+            recordsByAppointment.set(
+              normalizedRecord.appointmentId,
+              normalizedRecord,
+            );
+            return;
+          }
+
+          standaloneRecords.push(normalizedRecord);
+        });
+
+        const mappedRecords: MedicalRecord[] = appointmentsRes.data.map(
+          (appointment) => ({
+            id:
+              recordsByAppointment.get(appointment.id)?.id ||
+              `record-${appointment.id}`,
+            appointmentId: appointment.id,
+            patientId: appointment.patientId,
+            doctorId:
+              recordsByAppointment.get(appointment.id)?.doctorId ||
+              appointment.doctorId,
+            doctor:
+              recordsByAppointment.get(appointment.id)?.doctor ||
+              appointment.doctor,
+            patient:
+              recordsByAppointment.get(appointment.id)?.patient ||
+              appointment.patient ||
+              patientMap.get(appointment.patientId),
+            date: appointment.date,
+            type:
+              recordsByAppointment.get(appointment.id)?.type ||
+              (appointment.status === "complete" ? "treatment" : "note"),
+            diagnosis:
+              recordsByAppointment.get(appointment.id)?.diagnosis ||
+              appointment.service?.name ||
+              "Dental consultation",
+            treatment:
+              recordsByAppointment.get(appointment.id)?.treatment ||
+              appointment.notes ||
+              "Follow-up and treatment plan",
+            notes:
+              recordsByAppointment.get(appointment.id)?.notes ||
+              appointment.notes ||
+              "No additional notes.",
+            toothNumber:
+              recordsByAppointment.get(appointment.id)?.toothNumber ||
+              undefined,
+            attachments: [],
+            prescription: recordsByAppointment.get(appointment.id)?.prescription,
+          }),
+        );
+
+        setLatestAppointmentByPatient(computedLatestByPatient);
+        setRecords(
+          [...standaloneRecords, ...mappedRecords].sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+          ),
+        );
         setPatients(derivedPatients);
         setMedicines(medicinesRes.data);
       } catch (error) {
@@ -138,54 +242,123 @@ export default function DoctorMedicalRecords() {
     return matchesSearch && matchesPatient;
   });
 
-  const handleAddDiagnosis = () => {
+  const handleAddDiagnosis = async () => {
+    if (!newRecord.patientId) {
+      toast({
+        title: "Missing patient",
+        description: "Select a patient before adding a record.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selectedAppointment = latestAppointmentByPatient[newRecord.patientId];
+    if (!selectedAppointment?.id) {
+      toast({
+        title: "No appointment found",
+        description: "A linked appointment is required before saving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const selectedPatient = patients.find(
       (item) => item.id === newRecord.patientId,
     );
-    const createdRecord: MedicalRecord = {
-      id: `record-local-${Date.now()}`,
-      patientId: newRecord.patientId,
-      doctorId: "doctor-local",
-      patient: selectedPatient,
-      date: new Date().toISOString(),
-      type: addType === "note" ? "note" : "diagnosis",
-      diagnosis: newRecord.diagnosis || "Doctor note",
-      treatment: newRecord.treatment || "N/A",
-      notes: newRecord.notes || "No additional notes.",
-      toothNumber: newRecord.toothNumber || undefined,
-      attachments: [],
-      prescription: undefined,
-    };
+    try {
+      const result = await medicalRecordService.create({
+        appointmentId: selectedAppointment.id,
+        patientId: newRecord.patientId,
+        type: addType === "note" ? "note" : "diagnosis",
+        diagnosis: newRecord.diagnosis || "Doctor note",
+        treatment: newRecord.treatment || "N/A",
+        notes: newRecord.notes || "No additional notes.",
+        toothNumber: newRecord.toothNumber || undefined,
+      });
 
-    setRecords((prev) => [createdRecord, ...prev]);
-    toast({
-      title: "Record Added",
-      description: "Record was added to the current session.",
-    });
-    setAddDialogOpen(false);
-    setNewRecord({
-      patientId: "",
-      diagnosis: "",
-      treatment: "",
-      notes: "",
-      toothNumber: "",
-    });
+      const createdRecord: MedicalRecord = {
+        ...result.data,
+        patient: result.data.patient || selectedPatient,
+        doctor: result.data.doctor || selectedAppointment.doctor,
+        doctorId:
+          result.data.doctorId || selectedAppointment.doctorId || user?.id || "",
+      };
+
+      setRecords((prev) => [createdRecord, ...prev]);
+      toast({
+        title: "Record Added",
+        description: "Medical record was saved successfully.",
+      });
+      setAddDialogOpen(false);
+      setNewRecord({
+        patientId: "",
+        diagnosis: "",
+        treatment: "",
+        notes: "",
+        toothNumber: "",
+      });
+    } catch (error) {
+      console.error("Failed to create medical record:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save medical record.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleAddPrescription = async () => {
     try {
+      if (!newPrescription.patientId) {
+        toast({
+          title: "Missing patient",
+          description: "Select a patient before creating a prescription.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const selectedMedicine = medicines.find(
         (item) => item.id === newPrescription.medicineId,
       );
+      if (!selectedMedicine) {
+        toast({
+          title: "Missing medicine",
+          description: "Select a medicine before creating a prescription.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const selectedAppointment =
+        latestAppointmentByPatient[newPrescription.patientId];
+      if (!selectedAppointment?.id) {
+        toast({
+          title: "No appointment found",
+          description: "A linked appointment is required before prescribing.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const parsedAppointmentId = parseNumericId(selectedAppointment.id);
+      if (parsedAppointmentId === null) {
+        toast({
+          title: "Invalid appointment ID",
+          description: "Unable to send prescription with the selected record.",
+          variant: "destructive",
+        });
+        return;
+      }
 
       await prescriptionService.create({
-        appointmentId: null,
+        appointmentId: parsedAppointmentId,
         medicines: [
           {
             medicineId: Number(newPrescription.medicineId),
             dosage: newPrescription.dosage,
             frequency: newPrescription.frequency,
-            durationInDays: Number(newPrescription.duration) || null,
+            durationInDays: parseDurationDays(newPrescription.duration),
             instructions: newPrescription.instructions || null,
             quantity: null,
           },
@@ -197,8 +370,10 @@ export default function DoctorMedicalRecords() {
       );
       const prescriptionRecord: MedicalRecord = {
         id: `record-prescription-${Date.now()}`,
+        appointmentId: selectedAppointment.id,
         patientId: newPrescription.patientId,
-        doctorId: "doctor-local",
+        doctorId: selectedAppointment.doctorId || user?.id || "",
+        doctor: selectedAppointment.doctor,
         patient: selectedPatient,
         date: new Date().toISOString(),
         type: "prescription",

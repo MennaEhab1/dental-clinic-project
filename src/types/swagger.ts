@@ -30,6 +30,15 @@ export interface RegisterDTO {
   dateOfBirth?: string | null; // date-time
 }
 
+export interface UpdatePatientProfileDto {
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  gender?: string | null;
+  dateOfBirth?: string | null; // date-time
+}
+
 export interface UserDTO {
   userName?: string | null;
   email?: string | null;
@@ -86,6 +95,8 @@ export interface PrescriptionMedicineDetailsDto {
 
 export interface PrescriptionDetailsDTO {
   prescriptionId?: number;
+  appointmentId?: number | null;
+  appointmentID?: number | null;
   date?: string; // date-time
   doctorName?: string | null;
   patientName?: string | null;
@@ -98,6 +109,7 @@ export const SwaggerTypes = {
   ForgotPasswordDTO: undefined as unknown as ForgotPasswordDTO,
   LoginDTO: undefined as unknown as LoginDTO,
   RegisterDTO: undefined as unknown as RegisterDTO,
+  UpdatePatientProfileDto: undefined as unknown as UpdatePatientProfileDto,
   ResetPasswordDTO: undefined as unknown as ResetPasswordDTO,
   UserDTO: undefined as unknown as UserDTO,
   CreatePrescriptionDto: undefined as unknown as CreatePrescriptionDto,

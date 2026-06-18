@@ -18,13 +18,9 @@ import {
   Phone,
   MapPin,
   Calendar,
-  Heart,
-  Shield,
   Lock,
   Camera,
   Save,
-  AlertTriangle,
-  Droplet,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -64,18 +60,10 @@ export default function PatientProfile() {
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
-    email: "",
     phone: "",
     address: "",
     dateOfBirth: "",
     gender: "other" as "male" | "female" | "other",
-    bloodType: "",
-    emergencyName: "",
-    emergencyPhone: "",
-    emergencyRelation: "",
-    insuranceProvider: "",
-    policyNumber: "",
-    insuranceExpiry: "",
   });
 
   const [passwords, setPasswords] = useState({
@@ -121,15 +109,9 @@ export default function PatientProfile() {
       };
 
       try {
-        const allPatients = await patientService.getAll();
-        const matched = allPatients.data.find(
-          (item) =>
-            item.id === fallback.id ||
-            (fallback.email && item.email === fallback.email),
-        );
-
+        const profileResponse = await patientService.getProfile(fallback);
         const cached = loadCachedPatient();
-        const nextPatient = matched || cached || fallback;
+        const nextPatient = profileResponse.data || cached || fallback;
 
         setPatient(nextPatient);
         cachePatient(nextPatient);
@@ -151,43 +133,26 @@ export default function PatientProfile() {
     setFormData({
       firstName: patient.firstName,
       lastName: patient.lastName,
-      email: patient.email,
       phone: patient.phone,
       address: patient.address,
       dateOfBirth: patient.dateOfBirth,
       gender: patient.gender,
-      bloodType: patient.bloodType || "",
-      emergencyName: patient.emergencyContact?.name || "",
-      emergencyPhone: patient.emergencyContact?.phone || "",
-      emergencyRelation: patient.emergencyContact?.relationship || "",
-      insuranceProvider: patient.insuranceInfo?.provider || "",
-      policyNumber: patient.insuranceInfo?.policyNumber || "",
-      insuranceExpiry: patient.insuranceInfo?.expiryDate || "",
     });
   }, [patient]);
 
   const handleSave = async () => {
     try {
-      const updated = await patientService.update(patient.id, {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
-        address: formData.address,
-        dateOfBirth: formData.dateOfBirth,
-        gender: formData.gender,
-        bloodType: formData.bloodType || undefined,
-        emergencyContact: {
-          name: formData.emergencyName,
-          phone: formData.emergencyPhone,
-          relationship: formData.emergencyRelation,
+      const updated = await patientService.updateProfile(
+        {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone,
+          address: formData.address,
+          gender: formData.gender,
+          dateOfBirth: formData.dateOfBirth,
         },
-        insuranceInfo: {
-          provider: formData.insuranceProvider,
-          policyNumber: formData.policyNumber,
-          expiryDate: formData.insuranceExpiry,
-        },
-      });
+        patient,
+      );
 
       setPatient(updated.data);
       try {
@@ -255,7 +220,6 @@ export default function PatientProfile() {
         <Tabs defaultValue="personal" className="space-y-4">
           <TabsList className="bg-muted/50">
             <TabsTrigger value="personal">Personal Info</TabsTrigger>
-            <TabsTrigger value="medical">Medical Info</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
             <TabsTrigger value="preferences">Preferences</TabsTrigger>
           </TabsList>
@@ -329,13 +293,7 @@ export default function PatientProfile() {
                     <Label className="flex items-center gap-2">
                       <Mail className="w-3.5 h-3.5" /> Email
                     </Label>
-                    <Input
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) =>
-                        setFormData({ ...formData, email: e.target.value })
-                      }
-                    />
+                    <Input type="email" value={patient.email} disabled />
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -393,164 +351,6 @@ export default function PatientProfile() {
                 </Button>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          {/* Medical Information */}
-          <TabsContent value="medical">
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg font-display flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-destructive" /> Medical
-                    Details
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="flex items-center gap-2">
-                        <Droplet className="w-3.5 h-3.5" /> Blood Type
-                      </Label>
-                      <Input
-                        value={formData.bloodType}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            bloodType: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-2">
-                      <AlertTriangle className="w-3.5 h-3.5 text-warning" />{" "}
-                      Allergies
-                    </Label>
-                    <div className="flex flex-wrap gap-2">
-                      {patient.allergies?.map((allergy, i) => (
-                        <Badge
-                          key={i}
-                          variant="outline"
-                          className="bg-warning/10 text-warning"
-                        >
-                          {allergy}
-                        </Badge>
-                      ))}
-                      {(!patient.allergies ||
-                        patient.allergies.length === 0) && (
-                        <span className="text-sm text-muted-foreground">
-                          No known allergies
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg font-display flex items-center gap-2">
-                    <Phone className="w-5 h-5 text-destructive" /> Emergency
-                    Contact
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label>Name</Label>
-                      <Input
-                        value={formData.emergencyName}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            emergencyName: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Phone</Label>
-                      <Input
-                        value={formData.emergencyPhone}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            emergencyPhone: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Relationship</Label>
-                      <Input
-                        value={formData.emergencyRelation}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            emergencyRelation: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg font-display flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-primary" /> Insurance
-                    Information
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label>Provider</Label>
-                      <Input
-                        value={formData.insuranceProvider}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            insuranceProvider: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Policy Number</Label>
-                      <Input
-                        value={formData.policyNumber}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            policyNumber: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Expiry Date</Label>
-                      <Input
-                        type="date"
-                        value={formData.insuranceExpiry}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            insuranceExpiry: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Button onClick={handleSave} className="gradient-bg border-0">
-                <Save className="w-4 h-4 mr-2" /> Save Medical Info
-              </Button>
-            </div>
           </TabsContent>
 
           {/* Security */}

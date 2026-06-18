@@ -115,12 +115,43 @@ const medicalRecordFieldConfig: Array<{
 ];
 
 function parseNumericId(value: string): number | null {
-  const direct = Number(value);
-  if (Number.isFinite(direct)) return direct;
-  const matched = value.match(/\d+/);
-  if (!matched) return null;
-  const parsed = Number(matched[0]);
-  return Number.isFinite(parsed) ? parsed : null;
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const prefixed = raw.match(/^(?:appointment-|apt-)(\d+)$/i);
+  if (prefixed) {
+    const parsed = Number(prefixed[1]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+}
+
+function parseMedicineNumericId(value: string): number | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const trailing = raw.match(/(\d+)$/);
+  if (!trailing) return null;
+  const parsed = Number(trailing[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseNullablePositiveInt(value: string): number | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 export default function DoctorAppointments() {
@@ -385,20 +416,48 @@ export default function DoctorAppointments() {
     }
 
     const parsedAppointmentId = parseNumericId(activeAppointmentForAction.id);
+    if (parsedAppointmentId === null) {
+      toast({
+        title: "Invalid appointment",
+        description:
+          "This appointment has an invalid ID for backend prescription submission.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const parsedRows = prescriptionRows.map((row) => ({
+      medicineId: parseMedicineNumericId(row.medicineId),
+      dosage: row.dosage || null,
+      frequency: row.frequency || null,
+      durationInDays: parseNullablePositiveInt(row.durationInDays),
+      quantity: parseNullablePositiveInt(row.quantity),
+      instructions: row.instructions || null,
+    }));
+
+    const hasInvalidMedicineId = parsedRows.some((row) => row.medicineId === null);
+    if (hasInvalidMedicineId) {
+      toast({
+        title: "Invalid medicine",
+        description:
+          "One or more medicine IDs are invalid. Please reselect medicines.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmittingPrescription(true);
 
     try {
       await prescriptionService.create({
         appointmentId: parsedAppointmentId,
-        medicines: prescriptionRows.map((row) => ({
-          medicineId: Number(row.medicineId),
-          dosage: row.dosage || null,
-          frequency: row.frequency || null,
-          durationInDays: row.durationInDays
-            ? Number(row.durationInDays)
-            : null,
-          quantity: row.quantity ? Number(row.quantity) : null,
-          instructions: row.instructions || null,
+        medicines: parsedRows.map((row) => ({
+          medicineId: row.medicineId as number,
+          dosage: row.dosage,
+          frequency: row.frequency,
+          durationInDays: row.durationInDays,
+          quantity: row.quantity,
+          instructions: row.instructions,
         })),
       });
 

@@ -45,6 +45,14 @@ interface ReviewFormData {
   comment: string;
 }
 
+interface ReviewEligibleDoctor {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatar?: string;
+  specialty?: string;
+}
+
 export default function PatientReviews() {
   const [reviews, setReviews] = useState<ReviewWithAppointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -107,33 +115,60 @@ export default function PatientReviews() {
     fetchReviews();
   }, [user]);
 
-  const getReviewAppointmentIdForDoctor = (doctorId: string): string | null => {
-    const doctorAppointments = appointments.filter(
-      (appointment) => String(appointment.doctorId) === String(doctorId),
-    );
-
-    if (doctorAppointments.length === 0) return null;
-
-    const completedAppointment = doctorAppointments.find(
-      (appointment) => appointment.status === "complete",
-    );
-
-    return String((completedAppointment || doctorAppointments[0]).id);
+  const isReviewEligibleAppointment = (appointment: Appointment): boolean => {
+    return appointment.status === "complete";
   };
 
-  const eligibleDoctors = doctors.filter((doctor) => {
-    if (!doctor) return false;
+  const getReviewAppointmentIdForDoctor = (doctorId: string): string | null => {
+    const eligibleAppointments = appointments
+      .filter(
+        (appointment) =>
+          String(appointment.doctorId || appointment.doctor?.id || "") ===
+            String(doctorId) &&
+          isReviewEligibleAppointment(appointment),
+      )
+      .sort(
+        (a, b) =>
+          new Date(`${b.date}T${b.time || "00:00:00"}`).getTime() -
+          new Date(`${a.date}T${a.time || "00:00:00"}`).getTime(),
+      );
 
-    const hasAppointmentWithDoctor = appointments.some(
-      (appointment) => String(appointment.doctorId) === String(doctor.id),
-    );
+    if (eligibleAppointments.length === 0) return null;
+    return String(eligibleAppointments[0].id);
+  };
 
-    const alreadyReviewed = reviews.some(
-      (review) => String(review.doctorId) === String(doctor.id),
-    );
+  const eligibleDoctors: ReviewEligibleDoctor[] = Array.from(
+    appointments
+      .filter(isReviewEligibleAppointment)
+      .reduce<Map<string, ReviewEligibleDoctor>>((map, appointment) => {
+        const doctorId = String(appointment.doctorId || appointment.doctor?.id || "")
+          .trim();
+        if (!doctorId || map.has(doctorId)) return map;
 
-    return hasAppointmentWithDoctor && !alreadyReviewed;
-  });
+        const appointmentDoctor = appointment.doctor;
+        const directoryDoctor = doctors.find(
+          (doctor) => String(doctor.id) === doctorId,
+        );
+
+        map.set(doctorId, {
+          id: doctorId,
+          firstName:
+            appointmentDoctor?.firstName ||
+            directoryDoctor?.firstName ||
+            "Doctor",
+          lastName:
+            appointmentDoctor?.lastName || directoryDoctor?.lastName || "",
+          avatar: appointmentDoctor?.avatar || directoryDoctor?.avatar,
+          specialty:
+            appointmentDoctor?.specialty || directoryDoctor?.specialty || "",
+        });
+        return map;
+      }, new Map())
+      .values(),
+  ).filter(
+    (doctor) =>
+      !reviews.some((review) => String(review.doctorId) === String(doctor.id)),
+  );
 
   const handleSubmitReview = async () => {
     if (

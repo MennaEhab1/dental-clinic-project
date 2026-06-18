@@ -27,16 +27,64 @@ import {
   Activity,
 } from "lucide-react";
 import type { MedicalRecord, Prescription } from "@/types";
-import { appointmentService, prescriptionService } from "@/services/api";
+import {
+  appointmentService,
+  medicalRecordService,
+  prescriptionService,
+} from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { PrescriptionDetailsDTO } from "@/types/swagger";
 
 function extractAppointmentIdFromPrescription(
   prescription: PrescriptionDetailsDTO,
 ): string | null {
-  const raw = (prescription as Record<string, unknown>).appointmentId;
+  const raw =
+    prescription.appointmentId ??
+    prescription.appointmentID ??
+    (prescription as Record<string, unknown>).appointmentId;
   if (raw === undefined || raw === null) return null;
   return String(raw);
+}
+
+function toDoctorDisplayName(record: MedicalRecord): string {
+  const first = record.doctor?.firstName?.trim();
+  const last = record.doctor?.lastName?.trim();
+  const full = [first, last].filter(Boolean).join(" ").trim();
+  return full || "Unknown Doctor";
+}
+
+function toDoctorInitials(record: MedicalRecord): string {
+  const firstInitial = record.doctor?.firstName?.trim()?.[0] || "D";
+  const lastInitial = record.doctor?.lastName?.trim()?.[0] || "R";
+  return `${firstInitial}${lastInitial}`.toUpperCase();
+}
+
+function mapDoctorNameToRecord(rawDoctorName: string): MedicalRecord["doctor"] {
+  const normalized = rawDoctorName.replace(/^\s*dr\.?\s+/i, "").trim();
+  if (!normalized) return undefined;
+
+  const [firstName = "Doctor", ...rest] = normalized.split(/\s+/).filter(Boolean);
+  const lastName = rest.join(" ");
+  return {
+    id: `doctor-${normalized.toLowerCase().replace(/\s+/g, "-")}`,
+    email: "",
+    firstName,
+    lastName,
+    phone: "",
+    avatar: "",
+    role: "doctor",
+    specialty: "general",
+    qualifications: [],
+    experience: 0,
+    bio: "",
+    consultationFee: 0,
+    rating: 0,
+    reviewCount: 0,
+    availableSlots: [],
+    workingDays: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function mapPrescriptionDtoToPrescription(
@@ -86,16 +134,26 @@ function mapAppointmentsToRecords(
 ): MedicalRecord[] {
   return appointments.map((appointment) => ({
     id: `record-${appointment.id}`,
+    appointmentId: String(appointment.id),
     patientId: appointment.patientId,
     doctorId: appointment.doctorId,
     doctor: appointment.doctor,
     patient: appointment.patient,
     date: appointment.date,
-    type: appointment.prescription ? "prescription" : "treatment",
-    diagnosis: appointment.service?.name || "Dental consultation",
-    treatment: appointment.notes || "Follow-up and treatment plan",
-    notes: appointment.notes || "No additional notes.",
-    toothNumber: undefined,
+    type:
+      appointment.recordType ||
+      (appointment.prescription ? "prescription" : "treatment"),
+    diagnosis:
+      appointment.recordDiagnosis ||
+      appointment.service?.name ||
+      "Dental consultation",
+    treatment:
+      appointment.recordTreatment ||
+      appointment.notes ||
+      "Follow-up and treatment plan",
+    notes:
+      appointment.recordNotes || appointment.notes || "No additional notes.",
+    toothNumber: appointment.recordToothNumber || undefined,
     attachments: [],
     prescription: appointment.prescription,
   }));
@@ -119,6 +177,7 @@ export default function PatientMedicalRecords() {
         );
 
         const prescriptionMap = new Map<string, Prescription>();
+        const prescriptionDoctorMap = new Map<string, MedicalRecord["doctor"]>();
         try {
           const prescriptionsRes =
             await prescriptionService.getMyPrescriptions();
@@ -130,17 +189,97 @@ export default function PatientMedicalRecords() {
               appointmentId,
               mapPrescriptionDtoToPrescription(dto, appointmentId),
             );
+            if (dto.doctorName) {
+              prescriptionDoctorMap.set(
+                appointmentId,
+                mapDoctorNameToRecord(dto.doctorName),
+              );
+            }
           });
         } catch {
           // If prescriptions endpoint fails, still show medical records from appointments
         }
 
+        await Promise.all(
+          appointments
+            .filter((appointment) => !prescriptionMap.has(String(appointment.id)))
+            .map(async (appointment) => {
+              try {
+                const prescriptionRes = await prescriptionService.getByAppointment(
+                  String(appointment.id),
+                );
+                const dto = prescriptionRes.data;
+                if (!dto?.medicines || dto.medicines.length === 0) return;
+
+                const appointmentId =
+                  extractAppointmentIdFromPrescription(dto) ||
+                  String(appointment.id);
+                prescriptionMap.set(
+                  appointmentId,
+                  mapPrescriptionDtoToPrescription(dto, appointmentId),
+                );
+                if (dto.doctorName) {
+                  prescriptionDoctorMap.set(
+                    appointmentId,
+                    mapDoctorNameToRecord(dto.doctorName),
+                  );
+                }
+              } catch {
+                // Keep rendering even when prescription details endpoint is unavailable
+              }
+            }),
+        );
+
+        const appointmentRecordDetails = new Map<string, MedicalRecord>();
+        const standaloneMedicalRecords: MedicalRecord[] = [];
+        const patientId = appointments[0]?.patientId;
+        if (patientId) {
+          try {
+            const medicalRecordsResponse =
+              await medicalRecordService.getByPatient(String(patientId));
+            (medicalRecordsResponse.data || []).forEach((record) => {
+              if (record.appointmentId) {
+                appointmentRecordDetails.set(record.appointmentId, record);
+                return;
+              }
+
+              standaloneMedicalRecords.push(record);
+            });
+          } catch {
+            // Keep rendering appointment-based records when medical records endpoint is unavailable
+          }
+        }
+
         const recordsWithPrescriptions = appointments.map((appointment) => ({
           ...appointment,
+          doctor:
+            appointment.doctor ||
+            appointmentRecordDetails.get(String(appointment.id))?.doctor ||
+            prescriptionDoctorMap.get(String(appointment.id)),
+          recordType: appointmentRecordDetails.get(String(appointment.id))?.type,
+          recordDiagnosis:
+            appointmentRecordDetails.get(String(appointment.id))?.diagnosis,
+          recordTreatment:
+            appointmentRecordDetails.get(String(appointment.id))?.treatment,
+          recordNotes: appointmentRecordDetails.get(String(appointment.id))?.notes,
+          recordToothNumber:
+            appointmentRecordDetails.get(String(appointment.id))?.toothNumber,
           prescription: prescriptionMap.get(String(appointment.id)),
         }));
 
-        setRecords(mapAppointmentsToRecords(recordsWithPrescriptions));
+        const appointmentDerivedRecords =
+          mapAppointmentsToRecords(recordsWithPrescriptions);
+
+        const mergedRecords = [...standaloneMedicalRecords, ...appointmentDerivedRecords]
+          .map((record) => ({
+            ...record,
+            diagnosis: record.diagnosis || "Medical record",
+            treatment: record.treatment || "No treatment details provided.",
+            notes: record.notes || "No additional notes.",
+          }))
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        setRecords(mergedRecords);
       } catch (error) {
         console.error("Failed to load medical records:", error);
         setRecords([]);
@@ -203,7 +342,7 @@ export default function PatientMedicalRecords() {
               </span>
               <span className="flex items-center gap-1">
                 <Stethoscope className="w-3 h-3" />
-                Dr. {record.doctor?.lastName}
+                Dr. {toDoctorDisplayName(record)}
               </span>
               {record.toothNumber && <span>Tooth: {record.toothNumber}</span>}
               {record.attachments && record.attachments.length > 0 && (
@@ -301,15 +440,11 @@ export default function PatientMedicalRecords() {
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={selectedRecord.doctor?.avatar} />
-                      <AvatarFallback>
-                        {selectedRecord.doctor?.firstName[0]}
-                        {selectedRecord.doctor?.lastName[0]}
-                      </AvatarFallback>
+                      <AvatarFallback>{toDoctorInitials(selectedRecord)}</AvatarFallback>
                     </Avatar>
                     <div>
                       <p className="font-medium text-foreground text-sm">
-                        Dr. {selectedRecord.doctor?.firstName}{" "}
-                        {selectedRecord.doctor?.lastName}
+                        Dr. {toDoctorDisplayName(selectedRecord)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(selectedRecord.date).toLocaleDateString(

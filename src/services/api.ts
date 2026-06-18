@@ -46,6 +46,7 @@ import type {
   RefreshTokenRequestDTO,
   ResetPasswordDTO,
   RevokeTokenDTO,
+  UpdatePatientProfileDto,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -168,6 +169,70 @@ function splitDoctorName(rawDoctorName?: string | null): {
   lastName: string;
 } {
   return splitName(stripDoctorTitle(rawDoctorName));
+}
+
+function normalizeDateForInput(value?: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().split("T")[0];
+}
+
+function toOptionalIsoDate(value?: string | null): string | undefined {
+  const raw = String(value || "").trim();
+  if (!raw) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}T00:00:00.000Z`;
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function mapBackendPatientProfileToPatient(
+  raw: unknown,
+  fallback?: Partial<Patient>,
+): Patient {
+  const item =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const { firstName: splitFirstName, lastName: splitLastName } = splitName(
+    String(item.fullName || item.name || item.userName || "").trim(),
+  );
+
+  const rawGender = String(item.gender || fallback?.gender || "other")
+    .toLowerCase()
+    .trim();
+  const gender: "male" | "female" | "other" =
+    rawGender === "male" || rawGender === "female" || rawGender === "other"
+      ? rawGender
+      : "other";
+
+  return {
+    id: String(item.id || item.patientId || item.userId || fallback?.id || ""),
+    email: String(item.email || fallback?.email || ""),
+    firstName: String(
+      item.firstName || item.first_name || fallback?.firstName || splitFirstName,
+    ),
+    lastName: String(
+      item.lastName || item.last_name || fallback?.lastName || splitLastName,
+    ),
+    phone: String(item.phone || item.phoneNumber || fallback?.phone || ""),
+    avatar: String(item.avatar || item.profileImage || fallback?.avatar || ""),
+    role: "patient",
+    dateOfBirth: normalizeDateForInput(
+      String(item.dateOfBirth || fallback?.dateOfBirth || ""),
+    ),
+    gender,
+    address: String(item.address || fallback?.address || ""),
+    createdAt: String(
+      item.createdAt || fallback?.createdAt || new Date().toISOString(),
+    ),
+    updatedAt: String(
+      item.updatedAt || fallback?.updatedAt || new Date().toISOString(),
+    ),
+  };
 }
 
 function formatDateTimeInEgypt(date: Date): { date: string; time: string } {
@@ -1548,26 +1613,138 @@ export interface UpdateMedicalRecordRequest extends CreateMedicalRecordRequest {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapBackendToMedicalRecord(item: any): MedicalRecord {
+  const rawDoctorName = String(
+    item.doctorName || item.doctor_name || item.doctorFullName || "",
+  ).trim();
+  const { firstName: doctorFirstName, lastName: doctorLastName } =
+    splitDoctorName(rawDoctorName || null);
+  const doctorObj = item.doctor;
+
+  const mappedDoctor =
+    doctorObj && typeof doctorObj === "object"
+      ? {
+          id: String(doctorObj.id || doctorObj.doctorId || ""),
+          email: String(doctorObj.email || ""),
+          firstName: String(doctorObj.firstName || doctorObj.first_name || ""),
+          lastName: String(doctorObj.lastName || doctorObj.last_name || ""),
+          phone: String(doctorObj.phone || doctorObj.phoneNumber || ""),
+          avatar: String(doctorObj.avatar || doctorObj.profileImage || ""),
+          role: "doctor" as const,
+          specialty: "general" as const,
+          qualifications: [],
+          experience: 0,
+          bio: "",
+          consultationFee: 0,
+          rating: 0,
+          reviewCount: 0,
+          availableSlots: [],
+          workingDays: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+      : rawDoctorName
+        ? {
+            id: String(
+              item.doctorId ||
+                item.doctorID ||
+                `doctor-${rawDoctorName.toLowerCase().replace(/\s+/g, "-")}`,
+            ),
+            email: "",
+            firstName: doctorFirstName,
+            lastName: doctorLastName,
+            phone: "",
+            avatar: "",
+            role: "doctor" as const,
+            specialty: "general" as const,
+            qualifications: [],
+            experience: 0,
+            bio: "",
+            consultationFee: 0,
+            rating: 0,
+            reviewCount: 0,
+            availableSlots: [],
+            workingDays: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }
+        : undefined;
+
+  const rawPatientName = String(
+    item.patientName || item.patient_name || item.patientFullName || "",
+  ).trim();
+  const { firstName: patientFirstName, lastName: patientLastName } = splitName(
+    rawPatientName || null,
+  );
+  const patientObj = item.patient;
+
+  const mappedPatient =
+    patientObj && typeof patientObj === "object"
+      ? {
+          id: String(patientObj.id || patientObj.patientId || ""),
+          email: String(patientObj.email || ""),
+          firstName: String(patientObj.firstName || patientObj.first_name || ""),
+          lastName: String(patientObj.lastName || patientObj.last_name || ""),
+          phone: String(patientObj.phone || patientObj.phoneNumber || ""),
+          avatar: String(patientObj.avatar || patientObj.profileImage || ""),
+          role: "patient" as const,
+          dateOfBirth: String(patientObj.dateOfBirth || ""),
+          gender: "other" as const,
+          address: String(patientObj.address || ""),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }
+      : rawPatientName
+        ? {
+            id: String(
+              item.patientId ||
+                item.patientID ||
+                `patient-${rawPatientName.toLowerCase().replace(/\s+/g, "-")}`,
+            ),
+            email: "",
+            firstName: patientFirstName,
+            lastName: patientLastName,
+            phone: "",
+            avatar: "",
+            role: "patient" as const,
+            dateOfBirth: "",
+            gender: "other" as const,
+            address: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }
+        : undefined;
+
+  const normalizedType = String(item.type || item.recordType || "")
+    .toLowerCase()
+    .trim();
+
   return {
     id: String(item.id || item.recordId || `record-${Date.now()}`),
-    appointmentId: item.appointmentId
-      ? String(item.appointmentId)
-      : item.appointmentID
-        ? String(item.appointmentID)
-        : undefined,
-    patientId: String(item.patientId || item.patientID || ""),
-    doctorId: String(item.doctorId || item.doctorID || ""),
+    appointmentId:
+      item.appointmentId != null
+        ? String(item.appointmentId)
+        : item.appointmentID != null
+          ? String(item.appointmentID)
+          : item.appointment?.id != null
+            ? String(item.appointment.id)
+            : undefined,
+    patientId: String(item.patientId || item.patientID || mappedPatient?.id || ""),
+    doctorId: String(item.doctorId || item.doctorID || mappedDoctor?.id || ""),
+    patient: mappedPatient,
+    doctor: mappedDoctor,
     date: String(item.date || item.createdAt || new Date().toISOString()),
     type:
-      item.type === "diagnosis" ||
-      item.type === "treatment" ||
-      item.type === "prescription" ||
-      item.type === "note"
-        ? item.type
+      normalizedType === "diagnosis" ||
+      normalizedType === "treatment" ||
+      normalizedType === "prescription" ||
+      normalizedType === "note"
+        ? normalizedType
         : "note",
-    diagnosis: String(item.diagnosis || ""),
-    treatment: String(item.treatment || ""),
-    notes: String(item.notes || ""),
+    diagnosis: String(
+      item.diagnosis || item.primaryDiagnosis || item.recordTitle || "",
+    ),
+    treatment: String(item.treatment || item.plan || item.procedure || ""),
+    notes: String(item.notes || item.description || item.recordDetails || ""),
     toothNumber: item.toothNumber ? String(item.toothNumber) : undefined,
     attachments: [],
   };
@@ -1618,7 +1795,7 @@ export const medicalRecordService = {
     try {
       // Inferred endpoint because Swagger does not currently expose medical record endpoints.
       const res = await apiCall<unknown[]>(
-        `/api/MedicalRecord/patient/${patientId}`,
+        `/api/MedicalRecords/patient/${patientId}`,
         {
           method: "GET",
         },
@@ -1994,6 +2171,83 @@ export const doctorService = {
 
 // Patient Services
 export const patientService = {
+  async getProfile(fallback?: Partial<Patient>): Promise<ApiResponse<Patient>> {
+    const cached = readCachedPatientProfile();
+    const fallbackPatient = mapBackendPatientProfileToPatient(
+      fallback || {},
+      cached || fallback,
+    );
+
+    try {
+      const res = await apiCall<unknown>("/api/patient/profile", {
+        method: "GET",
+      });
+      const mapped = mapBackendPatientProfileToPatient(
+        res.data,
+        cached || fallbackPatient,
+      );
+      writeCachedPatientProfile(mapped);
+      return { data: mapped, success: true };
+    } catch (error) {
+      if (cached) {
+        return {
+          data: cached,
+          success: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch patient profile",
+        };
+      }
+
+      return {
+        data: fallbackPatient,
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch patient profile",
+      };
+    }
+  },
+
+  async updateProfile(
+    data: UpdatePatientProfileDto,
+    fallback?: Partial<Patient>,
+  ): Promise<ApiResponse<Patient>> {
+    const payload: UpdatePatientProfileDto = {
+      firstName: data.firstName ?? null,
+      lastName: data.lastName ?? null,
+      phone: data.phone ?? null,
+      address: data.address ?? null,
+      gender: data.gender ?? null,
+      dateOfBirth: toOptionalIsoDate(data.dateOfBirth) ?? null,
+    };
+
+    await apiCall<unknown>("/api/patient/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+
+    const refreshed = await this.getProfile(fallback);
+    if (refreshed.success) return refreshed;
+
+    const mergedFallback = mapBackendPatientProfileToPatient(
+      {
+        ...(fallback || {}),
+        firstName: payload.firstName ?? fallback?.firstName,
+        lastName: payload.lastName ?? fallback?.lastName,
+        phone: payload.phone ?? fallback?.phone,
+        address: payload.address ?? fallback?.address,
+        gender: payload.gender ?? fallback?.gender,
+        dateOfBirth: payload.dateOfBirth ?? fallback?.dateOfBirth,
+      },
+      refreshed.data,
+    );
+    writeCachedPatientProfile(mergedFallback);
+    return { data: mergedFallback, success: true };
+  },
+
   // Mock endpoints - no backend API available
   async getAll(): Promise<PaginatedResponse<Patient>> {
     await delay(600);
@@ -2070,6 +2324,24 @@ export const patientService = {
     return { data: res.data || [], success: true };
   },
 };
+
+function readCachedPatientProfile(): Patient | null {
+  try {
+    const raw = localStorage.getItem("patient_profile_cache");
+    if (!raw) return null;
+    return JSON.parse(raw) as Patient;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedPatientProfile(profile: Patient): void {
+  try {
+    localStorage.setItem("patient_profile_cache", JSON.stringify(profile));
+  } catch (error) {
+    console.warn("[patientService] Failed to cache patient profile", error);
+  }
+}
 
 // Admin Patient Services
 export const adminPatientService = {
@@ -2534,8 +2806,11 @@ export const appointmentService = {
     // Extract doctor info - handle nested doctor object
     const doctorId = String(
       item.dentistId ||
+        item.dentistID ||
         item.doctorId ||
+        item.doctorID ||
         item.doctor?.id ||
+        item.doctor?.doctorId ||
         item.doctor?.dentistId ||
         fallback?.doctorId ||
         "",
@@ -2556,7 +2831,13 @@ export const appointmentService = {
     const doctorObj = item.doctor ? (item.doctor as any) : undefined;
     const mappedDoctor = doctorObj
       ? {
-          id: String(doctorObj.id || ""),
+          id: String(
+            doctorObj.id ||
+              doctorObj.doctorId ||
+              doctorObj.dentistId ||
+              doctorObj.userId ||
+              "",
+          ),
           email: doctorObj.email || "",
           firstName: doctorObj.firstName || doctorObj.first_name || "",
           lastName: doctorObj.lastName || doctorObj.last_name || "",
@@ -2578,7 +2859,13 @@ export const appointmentService = {
         }
       : rawDoctorName
         ? {
-            id: String(item.doctorId || item.dentistId || doctorIdFromName),
+            id: String(
+              item.doctorId ||
+                item.doctorID ||
+                item.dentistId ||
+                item.dentistID ||
+                doctorIdFromName,
+            ),
             email: "",
             firstName: doctorFirstName,
             lastName: doctorLastName,
@@ -2673,15 +2960,15 @@ export const appointmentService = {
           "",
       ),
       patient: mappedPatient,
-      doctorId: doctorId,
+      doctorId: doctorId || mappedDoctor?.id || String(fallback?.doctorId || ""),
       doctor: mappedDoctor,
       serviceId: String(
         item.serviceId || item.service?.id || fallback?.serviceId || "",
       ),
       service: mappedService,
-      date: date || fallback?.date || "",
-      time: time || fallback?.time || "",
-      duration: item.duration || fallback?.duration || 0,
+      date: date || fallback?.date || formatDateTimeInEgypt(new Date()).date,
+      time: time || fallback?.time || "00:00",
+      duration: item.duration || fallback?.duration || 30,
       status: normalizeAppointmentStatus(item.status || fallback?.status),
       notes: item.notes || item.description || fallback?.notes || "",
       createdAt:

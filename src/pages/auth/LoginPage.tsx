@@ -124,9 +124,7 @@ export default function LoginPage() {
       setEmail(forgotPasswordEmail);
     } catch (error) {
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to send reset email";
+        error instanceof Error ? error.message : "Failed to send reset email";
       setForgotPasswordError(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -283,7 +281,8 @@ export default function LoginPage() {
           <DialogHeader>
             <DialogTitle>Forgot Password</DialogTitle>
             <DialogDescription>
-              Enter your email and we will ask the backend to send you a reset link.
+              Enter your email and we will ask the backend to send you a reset
+              link.
             </DialogDescription>
           </DialogHeader>
 
@@ -299,7 +298,9 @@ export default function LoginPage() {
                 className={`mt-2 ${forgotPasswordError ? "border-destructive" : ""}`}
               />
               {forgotPasswordError && (
-                <p className="text-xs text-destructive mt-1">{forgotPasswordError}</p>
+                <p className="text-xs text-destructive mt-1">
+                  {forgotPasswordError}
+                </p>
               )}
             </div>
 
@@ -339,4 +340,7 @@ export default function LoginPage() {
 /*{
   "email": "smartteethtest@gmail.com",
   "password": "Doctor123!"
-} */
+} 
+  ahmedhassan@smartteeth.com -nourali@smartteeth.com- Doctor@123 
+
+*/

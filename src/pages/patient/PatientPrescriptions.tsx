@@ -16,16 +16,24 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Pill,
-  Download,
-  FileText,
-  Clock,
   AlertCircle,
+  AlertTriangle,
   Calendar,
   ChevronRight,
-  AlertTriangle,
+  FileText,
 } from "lucide-react";
-import type { Prescription, PrescriptionMedication } from "@/types";
-import { prescriptionService } from "@/services/api";
+import type {
+  Appointment,
+  Doctor,
+  Prescription,
+  PrescriptionMedication,
+} from "@/types";
+import type { PrescriptionDetailsDTO } from "@/types/swagger";
+import {
+  appointmentService,
+  doctorService,
+  prescriptionService,
+} from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface EnhancedPrescription extends Prescription {
@@ -34,6 +42,136 @@ interface EnhancedPrescription extends Prescription {
   doctorSpecialty?: string;
   appointmentDate?: string;
   appointmentService?: string;
+}
+
+function normalizeLookupKey(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return String(numeric);
+
+  const numericMatch = raw.match(/\d+/);
+  if (numericMatch) return String(Number(numericMatch[0]));
+
+  return raw.toLowerCase();
+}
+
+function extractAppointmentIdFromPrescription(
+  prescription: PrescriptionDetailsDTO,
+): string | null {
+  const raw = prescription.appointmentId ?? prescription.appointmentID;
+  if (raw === undefined || raw === null) return null;
+  return String(raw);
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ")
+    .trim();
+}
+
+function toDoctorDisplayName(rawValue: string): string {
+  const raw = String(rawValue || "").trim();
+  if (!raw) return "";
+  if (!raw.includes("@")) return raw;
+
+  const localPart = raw.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return toTitleCase(localPart);
+}
+
+function getAppointmentFromMap(
+  appointmentsById: Map<string, Appointment>,
+  appointmentId: string | null,
+): Appointment | undefined {
+  if (!appointmentId) return undefined;
+  return (
+    appointmentsById.get(appointmentId) ||
+    appointmentsById.get(normalizeLookupKey(appointmentId))
+  );
+}
+
+function mapPrescriptionDtoToEnhanced(
+  dto: PrescriptionDetailsDTO,
+  appointmentsById: Map<string, Appointment>,
+  doctorsById: Map<string, Doctor>,
+): EnhancedPrescription {
+  const appointmentId = extractAppointmentIdFromPrescription(dto);
+  const appointment = getAppointmentFromMap(appointmentsById, appointmentId);
+  const doctorFromAppointment =
+    appointment?.doctor ||
+    (appointment?.doctorId
+      ? doctorsById.get(normalizeLookupKey(appointment.doctorId))
+      : undefined);
+
+  const doctorNameFromAppointment = [
+    doctorFromAppointment?.firstName,
+    doctorFromAppointment?.lastName,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  const dtoDoctorName = toDoctorDisplayName(String(dto.doctorName || ""));
+  const doctorName = dtoDoctorName || doctorNameFromAppointment;
+
+  const medicines = dto.medicines || [];
+  const medications: PrescriptionMedication[] = medicines.map(
+    (medicine, index) => ({
+      medicineId: `prescription-${dto.prescriptionId || appointmentId || "unknown"}-medicine-${index}`,
+      medicine: {
+        id: `medicine-${dto.prescriptionId || appointmentId || "unknown"}-${index}`,
+        name: medicine.medicineName || "Medicine",
+        genericName: medicine.medicineName || "Medicine",
+        category: "prescription",
+        manufacturer: "",
+        price: 0,
+        stock: 0,
+        unit: "",
+        description: "",
+      },
+      dosage: medicine.dosage || "",
+      frequency: medicine.frequency || "",
+      duration: medicine.durationInDays
+        ? `${medicine.durationInDays} day(s)`
+        : "",
+      notes: medicine.instructions || undefined,
+    }),
+  );
+
+  const instructions = medicines
+    .map((medicine) => medicine.instructions || "")
+    .map((instruction) => instruction.trim())
+    .filter(Boolean)
+    .join(" • ");
+
+  const dtoDate = String(dto.date || "").trim();
+  const createdAt =
+    dtoDate && !Number.isNaN(new Date(dtoDate).getTime())
+      ? dtoDate
+      : appointment?.date
+        ? `${appointment.date}T00:00:00`
+        : "";
+
+  return {
+    id: String(
+      dto.prescriptionId || `prescription-${appointmentId || Date.now()}`,
+    ),
+    appointmentId: appointmentId || "",
+    medications,
+    instructions,
+    createdAt,
+    doctorName,
+    doctorAvatar: doctorFromAppointment?.avatar,
+    doctorSpecialty: doctorFromAppointment?.specialty
+      ? String(doctorFromAppointment.specialty).replace("-", " ")
+      : "General Dentistry",
+    appointmentDate: appointment?.date,
+    appointmentService: appointment?.service?.name,
+  };
 }
 
 export default function PatientPrescriptions() {
@@ -51,24 +189,90 @@ export default function PatientPrescriptions() {
       try {
         setIsLoading(true);
 
-        // Fetch prescriptions directly from backend
-        const result = await prescriptionService.getMyPrescriptions();
+        const [result, appointmentsResult, doctorsResult] = await Promise.all([
+          prescriptionService.getMyPrescriptions(),
+          appointmentService.getByPatient(),
+          doctorService.getAll(),
+        ]);
 
         if (result.success && result.data && Array.isArray(result.data)) {
-          // Sort by creation date, most recent first
-          const sortedPrescriptions = result.data.sort(
-            (a, b) =>
-              new Date(b.date || "").getTime() -
-              new Date(a.date || "").getTime(),
+          const appointmentsById = new Map<string, Appointment>();
+          const completedAppointments = (appointmentsResult.data || []).filter(
+            (appointment) => appointment.status === "complete",
+          );
+          completedAppointments.forEach((appointment) => {
+            const rawId = String(appointment.id);
+            const normalizedId = normalizeLookupKey(rawId);
+            appointmentsById.set(rawId, appointment);
+            if (normalizedId && normalizedId !== rawId) {
+              appointmentsById.set(normalizedId, appointment);
+            }
+          });
+
+          const doctorsById = new Map<string, Doctor>();
+          (doctorsResult.data || []).forEach((doctor) => {
+            const key = normalizeLookupKey(doctor.id);
+            if (key) doctorsById.set(key, doctor);
+          });
+
+          const prescriptionsByAppointment = new Map<
+            string,
+            EnhancedPrescription
+          >();
+
+          result.data.forEach((dto) => {
+            const appointmentId = extractAppointmentIdFromPrescription(dto);
+            if (!appointmentId) return;
+
+            const mapped = mapPrescriptionDtoToEnhanced(
+              dto,
+              appointmentsById,
+              doctorsById,
+            );
+            prescriptionsByAppointment.set(appointmentId, mapped);
+          });
+
+          await Promise.all(
+            completedAppointments
+              .filter(
+                (appointment) =>
+                  !prescriptionsByAppointment.has(String(appointment.id)),
+              )
+              .map(async (appointment) => {
+                try {
+                  const byAppointment =
+                    await prescriptionService.getByAppointment(
+                      String(appointment.id),
+                    );
+                  if (!byAppointment.data?.medicines?.length) return;
+                  const mapped = mapPrescriptionDtoToEnhanced(
+                    byAppointment.data,
+                    appointmentsById,
+                    doctorsById,
+                  );
+                  prescriptionsByAppointment.set(
+                    String(appointment.id),
+                    mapped,
+                  );
+                } catch {
+                  // Keep rendering available prescriptions even if one appointment lookup fails.
+                }
+              }),
           );
 
-          // Convert to enhanced prescriptions
-          const enhanced = sortedPrescriptions.map(
-            (prsc) =>
-              ({
-                ...prsc,
-              }) as EnhancedPrescription,
-          );
+          const enhanced = Array.from(prescriptionsByAppointment.values())
+            .filter((prescription) => {
+              const hasMeds = (prescription.medications || []).length > 0;
+              const hasInstructions = Boolean(
+                String(prescription.instructions || "").trim(),
+              );
+              return hasMeds || hasInstructions;
+            })
+            .sort(
+              (a, b) =>
+                new Date(b.createdAt || "").getTime() -
+                new Date(a.createdAt || "").getTime(),
+            );
 
           setPrescriptions(enhanced);
           console.debug(
@@ -100,94 +304,6 @@ export default function PatientPrescriptions() {
     setDetailsOpen(true);
   };
 
-  const handleDownloadPrescription = (prescription: EnhancedPrescription) => {
-    const prescriptionText = `
-╔═══════════════════════════════════════════════════════╗
-║                    PRESCRIPTION                        ║
-╚═══════════════════════════════════════════════════════╝
-
-Doctor: Dr. ${prescription.doctorName || "Unknown"}
-Specialty: ${prescription.doctorSpecialty || "General Dentistry"}
-Date Prescribed: ${new Date(prescription.createdAt).toLocaleDateString(
-      "en-US",
-      {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      },
-    )}
-
-Service: ${prescription.appointmentService || "General Consultation"}
-
-─────────────────────────────────────────────────────────
-INSTRUCTIONS:
-${prescription.instructions || "No specific instructions provided"}
-
-─────────────────────────────────────────────────────────
-MEDICATIONS:
-
-${
-  prescription.medications && prescription.medications.length > 0
-    ? prescription.medications
-        .map(
-          (med: PrescriptionMedication, idx: number) => `
-${idx + 1}. ${med.medicine?.name || "Unknown Medication"}
-   Generic Name: ${med.medicine?.genericName || "N/A"}
-   Manufacturer: ${med.medicine?.manufacturer || "N/A"}
-   
-   Dosage: ${med.dosage}
-   Frequency: ${med.frequency}
-   Duration: ${med.duration}
-   ${med.notes ? `Notes: ${med.notes}` : ""}
-   `,
-        )
-        .join("\n")
-    : "No medications prescribed"
-}
-
-─────────────────────────────────────────────────────────
-IMPORTANT INFORMATION:
-
-⚠️  Side Effects & Warnings:
-${
-  prescription.medications && prescription.medications.length > 0
-    ? prescription.medications
-        .map((med: PrescriptionMedication) => {
-          if (
-            med.medicine?.sideEffects &&
-            med.medicine.sideEffects.length > 0
-          ) {
-            return `\n${med.medicine.name}:\n${med.medicine.sideEffects.map((se) => `  • ${se}`).join("\n")}`;
-          }
-          return "";
-        })
-        .filter((text) => text.length > 0)
-        .join("\n")
-    : "Refer to medication labels for warnings"
-}
-
-═══════════════════════════════════════════════════════════
-    For questions about your prescription, please
-    contact your dentist or healthcare provider.
-═══════════════════════════════════════════════════════════
-    `;
-
-    const element = document.createElement("a");
-    element.setAttribute(
-      "href",
-      "data:text/plain;charset=utf-8," + encodeURIComponent(prescriptionText),
-    );
-    element.setAttribute(
-      "download",
-      `prescription_${new Date(prescription.createdAt).toISOString().split("T")[0]}.txt`,
-    );
-    element.style.display = "none";
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-  };
-
   if (isLoading) {
     return (
       <DashboardLayout role="patient">
@@ -213,7 +329,7 @@ ${
             Prescriptions
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
-            View and download your prescriptions
+            View your prescriptions
           </p>
         </div>
 
@@ -254,7 +370,9 @@ ${
                         <div className="flex-1">
                           <div className="mb-1">
                             <h3 className="font-semibold text-gray-900 dark:text-white">
-                              Dr. {prescription.doctorName}
+                              {prescription.doctorName
+                                ? `Dr. ${prescription.doctorName}`
+                                : "Doctor not provided"}
                             </h3>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
                               {prescription.doctorSpecialty ||
@@ -295,17 +413,6 @@ ${
                           View Details
                           <ChevronRight className="w-4 h-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            handleDownloadPrescription(prescription)
-                          }
-                          className="gap-2"
-                        >
-                          <Download className="w-4 h-4" />
-                          Download
-                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -337,7 +444,9 @@ ${
                   </Avatar>
                   <div className="flex-1">
                     <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
-                      Dr. {selectedPrescription.doctorName}
+                      {selectedPrescription.doctorName
+                        ? `Dr. ${selectedPrescription.doctorName}`
+                        : "Doctor not provided"}
                     </h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {selectedPrescription.doctorSpecialty}
@@ -356,15 +465,6 @@ ${
                       )}
                     </div>
                   </div>
-                  <Button
-                    onClick={() =>
-                      handleDownloadPrescription(selectedPrescription)
-                    }
-                    className="gap-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </Button>
                 </div>
 
                 {/* Instructions */}
@@ -433,26 +533,6 @@ ${
                                   </div>
                                 </div>
 
-                                {/* Additional Info */}
-                                <div className="grid grid-cols-2 gap-3 text-sm">
-                                  <div>
-                                    <p className="text-xs font-semibold text-gray-500 uppercase">
-                                      Manufacturer
-                                    </p>
-                                    <p className="text-gray-900 dark:text-white mt-1">
-                                      {med.medicine?.manufacturer || "N/A"}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-semibold text-gray-500 uppercase">
-                                      Price
-                                    </p>
-                                    <p className="text-gray-900 dark:text-white mt-1">
-                                      ${med.medicine?.price || "N/A"}
-                                    </p>
-                                  </div>
-                                </div>
-
                                 {/* Notes */}
                                 {med.notes && (
                                   <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded flex gap-2">
@@ -463,7 +543,6 @@ ${
                                   </div>
                                 )}
 
-                                {/* Side Effects */}
                                 {med.medicine?.sideEffects &&
                                   med.medicine.sideEffects.length > 0 && (
                                     <div>
@@ -502,7 +581,6 @@ ${
                   </div>
                 </div>
 
-                {/* Important Notes */}
                 <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
                   <CardContent className="pt-4">
                     <p className="text-xs font-semibold text-blue-900 dark:text-blue-200 uppercase mb-2">

@@ -138,6 +138,19 @@ function toSafeNumber(value: unknown): number {
   return 0;
 }
 
+function normalizeLookupKey(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric)) return String(numeric);
+
+  const numericMatch = raw.match(/\d+/);
+  if (numericMatch) return String(Number(numericMatch[0]));
+
+  return raw.toLowerCase();
+}
+
 function splitName(fullName?: string | null): {
   firstName: string;
   lastName: string;
@@ -213,7 +226,10 @@ function mapBackendPatientProfileToPatient(
     id: String(item.id || item.patientId || item.userId || fallback?.id || ""),
     email: String(item.email || fallback?.email || ""),
     firstName: String(
-      item.firstName || item.first_name || fallback?.firstName || splitFirstName,
+      item.firstName ||
+        item.first_name ||
+        fallback?.firstName ||
+        splitFirstName,
     ),
     lastName: String(
       item.lastName || item.last_name || fallback?.lastName || splitLastName,
@@ -1596,6 +1612,42 @@ function writeStoredMedicalRecords(records: MedicalRecord[]): void {
   }
 }
 
+function parseEntityNumericId(value: unknown): number | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const prefixed = raw.match(
+    /^(?:patient|pat|appointment|apt|record|rec|medicalrecord|medical-record)-(\d+)$/i,
+  );
+  if (!prefixed) return null;
+
+  const parsed = Number(prefixed[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function buildMedicalRecordPatientIdCandidates(patientId: string): string[] {
+  const candidates = new Set<string>();
+  const provided = String(patientId || "").trim();
+  if (provided) candidates.add(provided);
+
+  const parsedProvided = parseEntityNumericId(provided);
+  if (parsedProvided !== null) candidates.add(String(parsedProvided));
+
+  const tokenPatientId = extractPatientIdFromToken(getAuthToken());
+  if (tokenPatientId) {
+    const parsedFromToken = parseEntityNumericId(tokenPatientId);
+    if (parsedFromToken !== null) candidates.add(String(parsedFromToken));
+    else candidates.add(String(tokenPatientId).trim());
+  }
+
+  return Array.from(candidates).filter(Boolean);
+}
+
 // Inferred from MedicalRecord usage in the app because Swagger does not include DTOs for these endpoints.
 export interface CreateMedicalRecordRequest {
   appointmentId?: string;
@@ -1682,7 +1734,9 @@ function mapBackendToMedicalRecord(item: any): MedicalRecord {
       ? {
           id: String(patientObj.id || patientObj.patientId || ""),
           email: String(patientObj.email || ""),
-          firstName: String(patientObj.firstName || patientObj.first_name || ""),
+          firstName: String(
+            patientObj.firstName || patientObj.first_name || "",
+          ),
           lastName: String(patientObj.lastName || patientObj.last_name || ""),
           phone: String(patientObj.phone || patientObj.phoneNumber || ""),
           avatar: String(patientObj.avatar || patientObj.profileImage || ""),
@@ -1728,7 +1782,9 @@ function mapBackendToMedicalRecord(item: any): MedicalRecord {
           : item.appointment?.id != null
             ? String(item.appointment.id)
             : undefined,
-    patientId: String(item.patientId || item.patientID || mappedPatient?.id || ""),
+    patientId: String(
+      item.patientId || item.patientID || mappedPatient?.id || "",
+    ),
     doctorId: String(item.doctorId || item.doctorID || mappedDoctor?.id || ""),
     patient: mappedPatient,
     doctor: mappedDoctor,
@@ -1792,53 +1848,85 @@ export const appointmentCareService = {
 
 export const medicalRecordService = {
   async getByPatient(patientId: string): Promise<ApiResponse<MedicalRecord[]>> {
-    try {
-      // Inferred endpoint because Swagger does not currently expose medical record endpoints.
-      const res = await apiCall<unknown[]>(
-        `/api/MedicalRecords/patient/${patientId}`,
-        {
-          method: "GET",
-        },
-      );
-      const mapped = (res.data || []).map((item) =>
-        mapBackendToMedicalRecord(item),
-      );
+    const patientIdCandidates =
+      buildMedicalRecordPatientIdCandidates(patientId);
+    const patientIdCandidateSet = new Set(patientIdCandidates);
 
-      // Merge backend and locally-cached records for continuity.
-      const local = readStoredMedicalRecords().filter(
-        (record) => record.patientId === patientId,
-      );
-      return { data: [...mapped, ...local], success: true };
-    } catch {
-      const local = readStoredMedicalRecords().filter(
-        (record) => record.patientId === patientId,
-      );
-      return { data: local, success: true };
+    const local = readStoredMedicalRecords().filter((record) =>
+      patientIdCandidateSet.has(String(record.patientId || "").trim()),
+    );
+
+    const endpoints = patientIdCandidates.flatMap((candidateId) => [
+      `/api/MedicalRecords/patient/${candidateId}`,
+      `/api/MedicalRecord/patient/${candidateId}`,
+      `/api/MedicalRecord/Patient/${candidateId}`,
+    ]);
+
+    const backendRecords: MedicalRecord[] = [];
+    let hasBackendSuccess = false;
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await apiCall<unknown[]>(endpoint, { method: "GET" });
+        hasBackendSuccess = true;
+        const mapped = (res.data || []).map((item) =>
+          mapBackendToMedicalRecord(item),
+        );
+        backendRecords.push(...mapped);
+      } catch {
+        // Try the next endpoint candidate.
+      }
     }
+
+    const seenRecordIds = new Set<string>();
+    const merged = [...backendRecords, ...local].filter((record) => {
+      const id = String(record.id || "").trim();
+      if (!id) return true;
+      if (seenRecordIds.has(id)) return false;
+      seenRecordIds.add(id);
+      return true;
+    });
+
+    if (!hasBackendSuccess && local.length === 0) {
+      return {
+        data: [],
+        success: false,
+        message: "Failed to fetch medical records from backend",
+      };
+    }
+
+    return { data: merged, success: true };
   },
 
   async create(
     data: CreateMedicalRecordRequest,
   ): Promise<ApiResponse<MedicalRecord>> {
-    const localRecord: MedicalRecord = {
-      id: `record-local-${Date.now()}`,
-      appointmentId: data.appointmentId,
-      patientId: data.patientId,
-      doctorId: "",
-      date: new Date().toISOString(),
-      type: data.type || "note",
-      diagnosis: data.diagnosis,
-      treatment: data.treatment,
-      notes: data.notes,
-      toothNumber: data.toothNumber,
-      attachments: [],
-    };
-
     try {
+      const normalizedPatientId = parseEntityNumericId(data.patientId);
+      if (normalizedPatientId === null) {
+        throw new Error(
+          `Invalid patientId for medical record submission: "${data.patientId}"`,
+        );
+      }
+
+      const normalizedAppointmentId =
+        data.appointmentId && String(data.appointmentId).trim().length > 0
+          ? parseEntityNumericId(data.appointmentId)
+          : null;
+      if (
+        data.appointmentId &&
+        String(data.appointmentId).trim().length > 0 &&
+        normalizedAppointmentId === null
+      ) {
+        throw new Error(
+          `Invalid appointmentId for medical record submission: "${data.appointmentId}"`,
+        );
+      }
+
       // Inferred payload shape from MedicalRecord interface fields used by existing pages.
       const payload = {
-        appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
-        patientId: data.patientId,
+        appointmentId: normalizedAppointmentId,
+        patientId: normalizedPatientId,
         diagnosis: data.diagnosis,
         treatment: data.treatment,
         notes: data.notes,
@@ -1852,38 +1940,39 @@ export const medicalRecordService = {
         body: JSON.stringify(payload),
       });
       return { data: mapBackendToMedicalRecord(res.data), success: true };
-    } catch {
-      const current = readStoredMedicalRecords();
-      writeStoredMedicalRecords([localRecord, ...current]);
-      return {
-        data: localRecord,
-        success: true,
-        message: "Medical record saved locally",
-      };
+    } catch (error) {
+      throw error;
     }
   },
 
   async update(
     data: UpdateMedicalRecordRequest,
   ): Promise<ApiResponse<MedicalRecord>> {
-    const updatedLocalRecord: MedicalRecord = {
-      id: data.id,
-      appointmentId: data.appointmentId,
-      patientId: data.patientId,
-      doctorId: "",
-      date: new Date().toISOString(),
-      type: data.type || "note",
-      diagnosis: data.diagnosis,
-      treatment: data.treatment,
-      notes: data.notes,
-      toothNumber: data.toothNumber,
-      attachments: [],
-    };
-
     try {
+      const normalizedPatientId = parseEntityNumericId(data.patientId);
+      if (normalizedPatientId === null) {
+        throw new Error(
+          `Invalid patientId for medical record update: "${data.patientId}"`,
+        );
+      }
+
+      const normalizedAppointmentId =
+        data.appointmentId && String(data.appointmentId).trim().length > 0
+          ? parseEntityNumericId(data.appointmentId)
+          : null;
+      if (
+        data.appointmentId &&
+        String(data.appointmentId).trim().length > 0 &&
+        normalizedAppointmentId === null
+      ) {
+        throw new Error(
+          `Invalid appointmentId for medical record update: "${data.appointmentId}"`,
+        );
+      }
+
       const payload = {
-        appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
-        patientId: data.patientId,
+        appointmentId: normalizedAppointmentId,
+        patientId: normalizedPatientId,
         diagnosis: data.diagnosis,
         treatment: data.treatment,
         notes: data.notes,
@@ -1896,21 +1985,8 @@ export const medicalRecordService = {
         body: JSON.stringify(payload),
       });
       return { data: mapBackendToMedicalRecord(res.data), success: true };
-    } catch {
-      const current = readStoredMedicalRecords();
-      const next = current.some((record) => record.id === data.id)
-        ? current.map((record) =>
-            record.id === data.id
-              ? { ...record, ...updatedLocalRecord }
-              : record,
-          )
-        : [updatedLocalRecord, ...current];
-      writeStoredMedicalRecords(next);
-      return {
-        data: updatedLocalRecord,
-        success: true,
-        message: "Medical record updated locally",
-      };
+    } catch (error) {
+      throw error;
     }
   },
 };
@@ -2549,6 +2625,46 @@ export const appointmentService = {
       const appointments = data.map((item) =>
         appointmentService.mapBackendToAppointment(item),
       );
+
+      const hasMissingDoctorDetails = appointments.some((appointment) => {
+        const firstName = appointment.doctor?.firstName?.trim();
+        const lastName = appointment.doctor?.lastName?.trim();
+        return !(firstName || lastName) && Boolean(appointment.doctorId);
+      });
+
+      if (hasMissingDoctorDetails) {
+        try {
+          const doctorsRes = await doctorService.getAll();
+          const doctorsById = new Map<string, Doctor>();
+          (doctorsRes.data || []).forEach((doctor) => {
+            const key = normalizeLookupKey(doctor.id);
+            if (key) doctorsById.set(key, doctor);
+          });
+
+          const enrichedAppointments = appointments.map((appointment) => {
+            const lookupKey = normalizeLookupKey(appointment.doctorId);
+            const matchedDoctor = lookupKey
+              ? doctorsById.get(lookupKey)
+              : undefined;
+            if (!matchedDoctor) return appointment;
+
+            const firstName = appointment.doctor?.firstName?.trim();
+            const lastName = appointment.doctor?.lastName?.trim();
+            if (firstName || lastName) return appointment;
+
+            return {
+              ...appointment,
+              doctor: matchedDoctor,
+              doctorId: appointment.doctorId || matchedDoctor.id,
+            };
+          });
+
+          return { data: enrichedAppointments, success: true };
+        } catch {
+          // Keep base appointment data if doctor lookup fails.
+        }
+      }
+
       return { data: appointments, success: true };
     } catch (error) {
       const errorMessage =
@@ -2818,7 +2934,15 @@ export const appointmentService = {
 
     // Build doctor from flat doctorName payloads (mirrors patientName handling)
     const rawDoctorName = String(
-      item.doctorName || item.doctor_name || "",
+      item.doctorName ||
+        item.doctor_name ||
+        item.doctorFullName ||
+        item.dentistName ||
+        item.dentist_name ||
+        item.dentistFullName ||
+        item.doctor?.name ||
+        item.dentist?.name ||
+        "",
     ).trim();
     const { firstName: doctorFirstName, lastName: doctorLastName } =
       splitDoctorName(rawDoctorName || null);
@@ -2827,8 +2951,8 @@ export const appointmentService = {
       : "";
 
     // Map doctor object if it exists in the backend response
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const doctorObj = item.doctor ? (item.doctor as any) : undefined;
+    const doctorObj =
+      item.doctor || item.dentist || item.doctorDTO || item.dentistDTO;
     const mappedDoctor = doctorObj
       ? {
           id: String(
@@ -2839,8 +2963,16 @@ export const appointmentService = {
               "",
           ),
           email: doctorObj.email || "",
-          firstName: doctorObj.firstName || doctorObj.first_name || "",
-          lastName: doctorObj.lastName || doctorObj.last_name || "",
+          firstName:
+            doctorObj.firstName ||
+            doctorObj.first_name ||
+            splitDoctorName(doctorObj.name || doctorObj.fullName || "")
+              .firstName,
+          lastName:
+            doctorObj.lastName ||
+            doctorObj.last_name ||
+            splitDoctorName(doctorObj.name || doctorObj.fullName || "")
+              .lastName,
           phone: doctorObj.phone || doctorObj.phoneNumber || "",
           avatar: doctorObj.avatar || doctorObj.profileImage || "",
           role: "doctor" as const,
@@ -2889,6 +3021,13 @@ export const appointmentService = {
     // Map service object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const serviceObj = item.service ? (item.service as any) : undefined;
+    const rawServiceName = String(
+      item.serviceName ||
+        item.service_name ||
+        item.specializationName ||
+        item.specialtyName ||
+        "",
+    ).trim();
     const mappedService = serviceObj
       ? {
           id: String(serviceObj.id || ""),
@@ -2901,7 +3040,20 @@ export const appointmentService = {
           price: serviceObj.price || 0,
           image: serviceObj.image || undefined,
         }
-      : undefined;
+      : rawServiceName
+        ? {
+            id: String(
+              item.serviceId || `service-${rawServiceName.toLowerCase()}`,
+            ),
+            name: rawServiceName,
+            description: "",
+            icon: "stethoscope",
+            specialty: "general",
+            duration: 30,
+            price: 0,
+            image: undefined,
+          }
+        : undefined;
 
     // Build patient from flat patientName payloads used by doctor endpoints.
     const patientName = String(item.patientName || "").trim();
@@ -2960,7 +3112,8 @@ export const appointmentService = {
           "",
       ),
       patient: mappedPatient,
-      doctorId: doctorId || mappedDoctor?.id || String(fallback?.doctorId || ""),
+      doctorId:
+        doctorId || mappedDoctor?.id || String(fallback?.doctorId || ""),
       doctor: mappedDoctor,
       serviceId: String(
         item.serviceId || item.service?.id || fallback?.serviceId || "",

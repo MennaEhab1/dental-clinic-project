@@ -62,7 +62,7 @@ interface PrescriptionMedicineForm {
 }
 
 interface MedicalRecordFormState {
-  type: "diagnosis" | "treatment" | "prescription" | "note";
+  type: "diagnosis" | "treatment" | "note";
   diagnosis: string;
   treatment: string;
   notes: string;
@@ -435,12 +435,30 @@ export default function DoctorAppointments() {
       instructions: row.instructions || null,
     }));
 
-    const hasInvalidMedicineId = parsedRows.some((row) => row.medicineId === null);
+    const hasInvalidMedicineId = parsedRows.some(
+      (row) => row.medicineId === null,
+    );
     if (hasInvalidMedicineId) {
       toast({
         title: "Invalid medicine",
         description:
           "One or more medicine IDs are invalid. Please reselect medicines.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const medicineIdSet = new Set<number>();
+    const hasDuplicateMedicines = parsedRows.some((row) => {
+      const medicineId = row.medicineId as number;
+      if (medicineIdSet.has(medicineId)) return true;
+      medicineIdSet.add(medicineId);
+      return false;
+    });
+    if (hasDuplicateMedicines) {
+      toast({
+        title: "Duplicate medicine detected",
+        description: "Each medicine can only be added once per prescription.",
         variant: "destructive",
       });
       return;
@@ -1012,9 +1030,6 @@ export default function DoctorAppointments() {
                           <SelectContent>
                             <SelectItem value="diagnosis">Diagnosis</SelectItem>
                             <SelectItem value="treatment">Treatment</SelectItem>
-                            <SelectItem value="prescription">
-                              Prescription
-                            </SelectItem>
                             <SelectItem value="note">Note</SelectItem>
                           </SelectContent>
                         </Select>

@@ -3329,10 +3329,46 @@ export const reviewService = {
    */
   async getMyReviews(): Promise<ApiResponse<Review[]>> {
     try {
-      const res = await apiCall<Review[]>("/api/PatientReviews/GetMyReviews", {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>("/api/PatientReviews/GetMyReviews", {
         method: "GET",
       });
-      return { data: res.data || [], success: true };
+      const raw: unknown = res.data;
+
+      console.debug("[reviewService.getMyReviews] Raw response:", raw);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      function extractArray(val: unknown): Review[] | null {
+        if (Array.isArray(val)) return val as Review[];
+        if (val && typeof val === "object") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const obj = val as Record<string, any>;
+          // ASP.NET JSON.NET: { "$id": "1", "$values": [...] }
+          if (Array.isArray(obj["$values"])) return obj["$values"] as Review[];
+          // Wrapped envelope: { data: [...] }
+          if (Array.isArray(obj["data"])) return obj["data"] as Review[];
+          // OkObjectResult: { value: [...] }
+          if (Array.isArray(obj["value"])) return obj["value"] as Review[];
+          // Nested $values inside value: { value: { "$values": [...] } }
+          if (obj["value"] && typeof obj["value"] === "object") {
+            const nested = extractArray(obj["value"]);
+            if (nested) return nested;
+          }
+          // Nested $values inside data: { data: { "$values": [...] } }
+          if (obj["data"] && typeof obj["data"] === "object") {
+            const nested = extractArray(obj["data"]);
+            if (nested) return nested;
+          }
+        }
+        return null;
+      }
+
+      const reviews = extractArray(raw) ?? [];
+      console.debug(
+        "[reviewService.getMyReviews] Parsed reviews:",
+        reviews.length,
+      );
+      return { data: reviews, success: true };
     } catch (error) {
       console.error("[reviewService.getMyReviews] Error:", error);
       return { data: [], success: false };
@@ -3345,11 +3381,19 @@ export const reviewService = {
    */
   async getReviewsForDoctor(doctorId: string): Promise<ApiResponse<Review[]>> {
     try {
-      const res = await apiCall<Review[]>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>(
         `/api/PatientReviews/GetMyReviewsForDoctor/${doctorId}`,
         { method: "GET" },
       );
-      return { data: res.data || [], success: true };
+      const reviews: Review[] = Array.isArray(res.data)
+        ? (res.data as Review[])
+        : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          Array.isArray((res.data as any)?.data)
+          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ((res.data as any).data as Review[])
+          : [];
+      return { data: reviews, success: true };
     } catch (error) {
       console.error(
         "[reviewService.getReviewsForDoctor] Error for doctor",
@@ -3398,8 +3442,10 @@ export const reviewService = {
           comment: data.comment,
         }),
       });
+      // Backend returns Ok("Review added successfully") — a plain string, not a Review object.
+      // Treat any 2xx response as success; data will be the string message.
       return {
-        data: res.data,
+        data: (typeof res.data === "object" ? res.data : {}) as Review,
         success: true,
         message: "Review added successfully",
       };

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -24,6 +25,9 @@ import {
   Trash2,
   Send,
   Calendar,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
 } from "lucide-react";
 import type { Review, Doctor, Appointment } from "@/types";
 import {
@@ -53,6 +57,14 @@ interface ReviewEligibleDoctor {
   specialty?: string;
 }
 
+type ToastType = "success" | "error" | "warning";
+
+interface ToastMessage {
+  id: number;
+  type: ToastType;
+  message: string;
+}
+
 export default function PatientReviews() {
   const [reviews, setReviews] = useState<ReviewWithAppointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -67,33 +79,60 @@ export default function PatientReviews() {
   });
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const { user } = useAuth();
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { user, isLoading: authLoading } = useAuth();
+
+  const showToast = (type: ToastType, message: string) => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
 
   useEffect(() => {
+    // Wait until AuthContext finishes resolving (e.g. after page reload).
+    // If still loading, do nothing — the effect will re-run once authLoading → false.
+    if (authLoading) return;
+
+    // If auth finished loading but there's still no user, stop.
+    if (!user) return;
+
     const fetchReviews = async () => {
       try {
         setIsLoading(true);
 
-        // Fetch user's reviews
+        // Fetch doctors first so we can immediately enrich reviews with doctor info
+        const doctorsResult = await doctorService.getAll();
+        const doctorsList: Doctor[] =
+          doctorsResult.success && doctorsResult.data ? doctorsResult.data : [];
+        if (!doctorsResult.success) {
+          console.warn(
+            "[PatientReviews] Failed to fetch doctors or no data returned",
+          );
+        }
+        setDoctors(doctorsList);
+
+        // Fetch reviews and enrich with doctor info using the already-loaded list
         const reviewsResult = await reviewService.getMyReviews();
-        if (reviewsResult.success && reviewsResult.data) {
-          setReviews(reviewsResult.data);
+        if (reviewsResult.success && Array.isArray(reviewsResult.data)) {
+          const enriched = reviewsResult.data.map((review) => {
+            if (!review.doctor && review.doctorId) {
+              const matched = doctorsList.find(
+                (d) => String(d.id) === String(review.doctorId),
+              );
+              if (matched) return { ...review, doctor: matched };
+            }
+            return review;
+          });
+          setReviews(enriched);
         } else {
           console.warn(
             "[PatientReviews] Failed to fetch reviews or no data returned",
           );
           setReviews([]);
-        }
-
-        // Fetch available doctors for writing reviews
-        const doctorsResult = await doctorService.getAll();
-        if (doctorsResult.success && doctorsResult.data) {
-          setDoctors(doctorsResult.data);
-        } else {
-          console.warn(
-            "[PatientReviews] Failed to fetch doctors or no data returned",
-          );
-          setDoctors([]);
         }
 
         const appointmentsResult = await appointmentService.getByPatient();
@@ -113,7 +152,7 @@ export default function PatientReviews() {
     };
 
     fetchReviews();
-  }, [user]);
+  }, [user, authLoading]);
 
   const isReviewEligibleAppointment = (appointment: Appointment): boolean => {
     return appointment.status === "complete";
@@ -124,8 +163,7 @@ export default function PatientReviews() {
       .filter(
         (appointment) =>
           String(appointment.doctorId || appointment.doctor?.id || "") ===
-            String(doctorId) &&
-          isReviewEligibleAppointment(appointment),
+            String(doctorId) && isReviewEligibleAppointment(appointment),
       )
       .sort(
         (a, b) =>
@@ -141,8 +179,9 @@ export default function PatientReviews() {
     appointments
       .filter(isReviewEligibleAppointment)
       .reduce<Map<string, ReviewEligibleDoctor>>((map, appointment) => {
-        const doctorId = String(appointment.doctorId || appointment.doctor?.id || "")
-          .trim();
+        const doctorId = String(
+          appointment.doctorId || appointment.doctor?.id || "",
+        ).trim();
         if (!doctorId || map.has(doctorId)) return map;
 
         const appointmentDoctor = appointment.doctor;
@@ -176,10 +215,11 @@ export default function PatientReviews() {
       !formData.comment.trim() ||
       formData.rating === 0
     ) {
-      alert("Please fill in all fields");
+      showToast("warning", "Please fill in all fields");
       return;
     }
 
+    setIsSubmitting(true);
     try {
       if (editingReview) {
         // Update existing review
@@ -188,14 +228,18 @@ export default function PatientReviews() {
           comment: formData.comment,
         });
         if (result.success) {
-          setReviews(
-            reviews.map((r) =>
+          setReviews((prev) =>
+            prev.map((r) =>
               r.id === editingReview.id
                 ? { ...r, rating: formData.rating, comment: formData.comment }
                 : r,
             ),
           );
-          alert("Review updated successfully!");
+          resetForm();
+          setShowForm(false);
+          showToast("success", "Review updated successfully!");
+        } else {
+          showToast("error", "Failed to update review. Please try again.");
         }
       } else {
         // Add new review
@@ -203,8 +247,9 @@ export default function PatientReviews() {
           formData.doctorId,
         );
         if (!appointmentId) {
-          alert(
-            "You can only submit a review for doctors you have an appointment with.",
+          showToast(
+            "warning",
+            "You can only submit a review for doctors you have a completed appointment with.",
           );
           return;
         }
@@ -216,35 +261,132 @@ export default function PatientReviews() {
           comment: formData.comment,
         });
         if (result.success) {
-          // Refresh reviews
+          // Build the real ID from the backend response — never fall back to a local-* ID
+          // because that breaks UpdateReview later.
+          const realId = result.data?.id ? String(result.data.id) : null;
+
+          // Helper: build an enriched optimistic review using the real backend ID
+          const buildOptimistic = (id: string): ReviewWithAppointment => ({
+            id,
+            doctorId: formData.doctorId,
+            doctor: (() => {
+              const found =
+                appointments.find(
+                  (a) =>
+                    String(a.doctorId || a.doctor?.id) === formData.doctorId,
+                )?.doctor ||
+                doctors.find((d) => String(d.id) === formData.doctorId);
+              return found
+                ? {
+                    id: String(found.id),
+                    email: found.email || "",
+                    firstName: found.firstName || "",
+                    lastName: found.lastName || "",
+                    phone: found.phone || "",
+                    avatar: found.avatar,
+                    role: "doctor" as const,
+                    specialty: found.specialty || "general",
+                    qualifications: [],
+                    experience: 0,
+                    bio: "",
+                    consultationFee: 0,
+                    rating: 0,
+                    reviewCount: 0,
+                    availableSlots: [],
+                    workingDays: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  }
+                : undefined;
+            })(),
+            rating: formData.rating,
+            comment: formData.comment,
+            patientId: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+
+          // Try to refresh from backend first
           const reviewsResult = await reviewService.getMyReviews();
-          if (reviewsResult.success && reviewsResult.data) {
-            setReviews(reviewsResult.data);
+          if (
+            reviewsResult.success &&
+            Array.isArray(reviewsResult.data) &&
+            reviewsResult.data.length > 0
+          ) {
+            const enriched = reviewsResult.data.map((review) => {
+              if (!review.doctor && review.doctorId) {
+                const matched = doctors.find(
+                  (d) => String(d.id) === String(review.doctorId),
+                );
+                if (matched) return { ...review, doctor: matched };
+              }
+              return review;
+            });
+            setReviews(enriched);
+          } else if (realId) {
+            // Backend returned empty (possible caching delay) but we have a real ID —
+            // show optimistic review immediately, then retry once after a short delay.
+            setReviews((prev) => [buildOptimistic(realId), ...prev]);
+            setTimeout(async () => {
+              const retryResult = await reviewService.getMyReviews();
+              if (
+                retryResult.success &&
+                Array.isArray(retryResult.data) &&
+                retryResult.data.length > 0
+              ) {
+                const enriched = retryResult.data.map((review) => {
+                  if (!review.doctor && review.doctorId) {
+                    const matched = doctors.find(
+                      (d) => String(d.id) === String(review.doctorId),
+                    );
+                    if (matched) return { ...review, doctor: matched };
+                  }
+                  return review;
+                });
+                setReviews(enriched);
+              }
+            }, 1500);
+          } else {
+            // No real ID from backend at all — show warning instead of unusable local review
+            showToast(
+              "warning",
+              "Review submitted but couldn't load updated list. Please refresh the page.",
+            );
           }
-          alert("Review submitted successfully!");
+          resetForm();
+          setShowForm(false);
+          showToast("success", "Review submitted successfully!");
+        } else {
+          showToast("error", "Failed to submit review. Please try again.");
         }
       }
-
-      resetForm();
-      setShowForm(false);
     } catch (error) {
       console.error("[PatientReviews] Error submitting review:", error);
-      alert("Failed to submit review. Please try again.");
+      showToast("error", "Failed to submit review. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleDeleteReview = async (reviewId: string) => {
-    if (!confirm("Are you sure you want to delete this review?")) return;
+    setDeleteConfirmId(reviewId);
+  };
 
+  const confirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const reviewId = deleteConfirmId;
+    setDeleteConfirmId(null);
     try {
       const result = await reviewService.deleteReview(reviewId);
       if (result.success) {
-        setReviews(reviews.filter((r) => r.id !== reviewId));
-        alert("Review deleted successfully!");
+        setReviews((prev) => prev.filter((r) => r.id !== reviewId));
+        showToast("success", "Review deleted successfully!");
+      } else {
+        showToast("error", "Failed to delete review. Please try again.");
       }
     } catch (error) {
       console.error("[PatientReviews] Error deleting review:", error);
-      alert("Failed to delete review. Please try again.");
+      showToast("error", "Failed to delete review. Please try again.");
     }
   };
 
@@ -314,7 +456,10 @@ export default function PatientReviews() {
           <Button
             onClick={() => {
               if (eligibleDoctors.length === 0) {
-                alert("No eligible doctors to review yet.");
+                showToast(
+                  "warning",
+                  "No eligible doctors to review yet. Complete an appointment first.",
+                );
                 return;
               }
 
@@ -348,7 +493,10 @@ export default function PatientReviews() {
                   className="mt-4"
                   onClick={() => {
                     if (eligibleDoctors.length === 0) {
-                      alert("No eligible doctors to review yet.");
+                      showToast(
+                        "warning",
+                        "No eligible doctors to review yet. Complete an appointment first.",
+                      );
                       return;
                     }
 
@@ -513,6 +661,11 @@ export default function PatientReviews() {
             <DialogTitle>
               {editingReview ? "Edit Review" : "Write a Review"}
             </DialogTitle>
+            <DialogDescription>
+              {editingReview
+                ? "Update your rating and comments for this doctor."
+                : "Share your experience with this doctor."}
+            </DialogDescription>
           </DialogHeader>
 
           <ScrollArea className="h-full pr-4">
@@ -584,15 +737,77 @@ export default function PatientReviews() {
                 >
                   Cancel
                 </Button>
-                <Button onClick={handleSubmitReview} className="gap-2">
+                <Button
+                  onClick={handleSubmitReview}
+                  className="gap-2"
+                  disabled={isSubmitting}
+                >
                   <Send className="w-4 h-4" />
-                  {editingReview ? "Update Review" : "Submit Review"}
+                  {isSubmitting
+                    ? "Submitting..."
+                    : editingReview
+                      ? "Update Review"
+                      : "Submit Review"}
                 </Button>
               </div>
             </div>
           </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={!!deleteConfirmId}
+        onOpenChange={() => setDeleteConfirmId(null)}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Review</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this review? This action cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-3 justify-end pt-2">
+            <Button variant="outline" onClick={() => setDeleteConfirmId(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* In-page Toast Notifications */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium pointer-events-auto max-w-sm ${
+                toast.type === "success"
+                  ? "bg-green-50 border border-green-200 text-green-800 dark:bg-green-900/40 dark:border-green-700 dark:text-green-200"
+                  : toast.type === "error"
+                    ? "bg-red-50 border border-red-200 text-red-800 dark:bg-red-900/40 dark:border-red-700 dark:text-red-200"
+                    : "bg-yellow-50 border border-yellow-200 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-700 dark:text-yellow-200"
+              }`}
+            >
+              {toast.type === "success" ? (
+                <CheckCircle className="w-4 h-4 shrink-0" />
+              ) : toast.type === "error" ? (
+                <XCircle className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 shrink-0" />
+              )}
+              {toast.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </DashboardLayout>
   );
 }

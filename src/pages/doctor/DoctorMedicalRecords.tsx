@@ -1,8 +1,12 @@
+// DoctorMedicalRecords.tsx
+// Uses GET /api/MedicalRecords/my-created-medical-records for the doctor's records
+// POST /api/MedicalRecords/create to add records
+// GET /api/MedicalRecords/details/{id} for record details
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,17 +39,22 @@ import {
   Pill,
   Activity,
   Save,
+  Loader2,
 } from "lucide-react";
 import {
   doctorService,
   medicalRecordService,
   pharmacyService,
   prescriptionService,
+  isBackendMedicalRecordId,
 } from "@/services/api";
 import type { Appointment, MedicalRecord, Patient, Medicine } from "@/types";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
+// ──────────────────────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────────────────────
 function parseNumericId(value: string): number | null {
   const direct = Number(value);
   if (Number.isFinite(direct)) return direct;
@@ -64,6 +73,9 @@ function parseDurationDays(value: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+// ──────────────────────────────────────────────────────────────
+// Component
+// ──────────────────────────────────────────────────────────────
 export default function DoctorMedicalRecords() {
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -79,7 +91,12 @@ export default function DoctorMedicalRecords() {
     "diagnosis",
   );
 
-  // New record form state
+  // Detail dialog state
+  const [detailRecord, setDetailRecord] = useState<MedicalRecord | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // New record form
   const [newRecord, setNewRecord] = useState({
     patientId: "",
     diagnosis: "",
@@ -88,7 +105,7 @@ export default function DoctorMedicalRecords() {
     toothNumber: "",
   });
 
-  // New prescription form state
+  // New prescription form
   const [newPrescription, setNewPrescription] = useState({
     patientId: "",
     medicineId: "",
@@ -97,17 +114,21 @@ export default function DoctorMedicalRecords() {
     duration: "",
     instructions: "",
   });
+
   const { user } = useAuth();
 
+  // ── Fetch data ───────────────────────────────────────────────
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [appointmentsRes, medicinesRes] = await Promise.all([
+        const [recordsRes, appointmentsRes, medicinesRes] = await Promise.all([
+          medicalRecordService.getMyCreatedRecords(),
           doctorService.getAppointments(),
           pharmacyService.getAll(),
         ]);
 
-        const derivedPatients = appointmentsRes.data
+        const appointments = appointmentsRes.data || [];
+        const derivedPatients = appointments
           .map((item) => item.patient)
           .filter((item): item is Patient => !!item)
           .filter(
@@ -119,9 +140,10 @@ export default function DoctorMedicalRecords() {
           derivedPatients.map((item) => [item.id, item]),
         );
         const appointmentById = new Map(
-          appointmentsRes.data.map((item) => [item.id, item]),
+          appointments.map((item) => [item.id, item]),
         );
-        const computedLatestByPatient = appointmentsRes.data.reduce<
+
+        const computedLatestByPatient = appointments.reduce<
           Record<string, Appointment>
         >((acc, appointment) => {
           const current = acc[appointment.patientId];
@@ -138,91 +160,33 @@ export default function DoctorMedicalRecords() {
           return acc;
         }, {});
 
-        const recordsByAppointment = new Map<string, MedicalRecord>();
-        const standaloneRecords: MedicalRecord[] = [];
-        const backendRecords = await Promise.all(
-          derivedPatients.map(async (patient) => {
-            try {
-              const response = await medicalRecordService.getByPatient(patient.id);
-              return response.data || [];
-            } catch {
-              return [] as MedicalRecord[];
-            }
-          }),
-        );
-
-        backendRecords.flat().forEach((record) => {
+        const enrichedRecords = (recordsRes.data || []).map((record) => {
           const appointment = record.appointmentId
             ? appointmentById.get(record.appointmentId)
             : undefined;
-          const normalizedRecord: MedicalRecord = {
+
+          return {
             ...record,
-            patient: record.patient || patientMap.get(record.patientId),
-            doctor: record.doctor || appointment?.doctor,
-          };
-
-          if (normalizedRecord.appointmentId) {
-            recordsByAppointment.set(
-              normalizedRecord.appointmentId,
-              normalizedRecord,
-            );
-            return;
-          }
-
-          standaloneRecords.push(normalizedRecord);
-        });
-
-        const mappedRecords: MedicalRecord[] = appointmentsRes.data.map(
-          (appointment) => ({
-            id:
-              recordsByAppointment.get(appointment.id)?.id ||
-              `record-${appointment.id}`,
-            appointmentId: appointment.id,
-            patientId: appointment.patientId,
-            doctorId:
-              recordsByAppointment.get(appointment.id)?.doctorId ||
-              appointment.doctorId,
-            doctor:
-              recordsByAppointment.get(appointment.id)?.doctor ||
-              appointment.doctor,
             patient:
-              recordsByAppointment.get(appointment.id)?.patient ||
-              appointment.patient ||
-              patientMap.get(appointment.patientId),
-            date: appointment.date,
-            type:
-              recordsByAppointment.get(appointment.id)?.type ||
-              (appointment.status === "complete" ? "treatment" : "note"),
-            diagnosis:
-              recordsByAppointment.get(appointment.id)?.diagnosis ||
-              appointment.service?.name ||
-              "Dental consultation",
-            treatment:
-              recordsByAppointment.get(appointment.id)?.treatment ||
-              appointment.notes ||
-              "Follow-up and treatment plan",
-            notes:
-              recordsByAppointment.get(appointment.id)?.notes ||
-              appointment.notes ||
-              "No additional notes.",
-            toothNumber:
-              recordsByAppointment.get(appointment.id)?.toothNumber ||
-              undefined,
-            attachments: [],
-            prescription: recordsByAppointment.get(appointment.id)?.prescription,
-          }),
-        );
+              record.patient ||
+              appointment?.patient ||
+              patientMap.get(record.patientId),
+            doctor: record.doctor || appointment?.doctor,
+            patientId: record.patientId || appointment?.patientId || "",
+            doctorId: record.doctorId || appointment?.doctorId || "",
+          };
+        });
 
         setLatestAppointmentByPatient(computedLatestByPatient);
         setRecords(
-          [...standaloneRecords, ...mappedRecords].sort(
+          enrichedRecords.sort(
             (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
           ),
         );
         setPatients(derivedPatients);
         setMedicines(medicinesRes.data);
       } catch (error) {
-        console.error("Failed to fetch medical records data:", error);
+        console.error("[DoctorMedicalRecords] Failed to fetch data:", error);
         setRecords([]);
       } finally {
         setIsLoading(false);
@@ -232,6 +196,32 @@ export default function DoctorMedicalRecords() {
     fetchData();
   }, []);
 
+  // ── Open detail dialog ──────────────────────────────────────
+  const handleOpenDetail = async (record: MedicalRecord) => {
+    setDetailRecord(record);
+    setDetailOpen(true);
+
+    // Fetch /details/{id} only for real backend IDs (not synthetic "record-xxx")
+    if (isBackendMedicalRecordId(record.id)) {
+      setDetailLoading(true);
+      try {
+        const res = await medicalRecordService.getById(record.id);
+        if (res.success && res.data) {
+          setDetailRecord({
+            ...res.data,
+            patient: res.data.patient ?? record.patient,
+            doctor: res.data.doctor ?? record.doctor,
+          });
+        }
+      } catch {
+        // Keep list-level data
+      } finally {
+        setDetailLoading(false);
+      }
+    }
+  };
+
+  // ── Filtered records ─────────────────────────────────────────
   const filteredRecords = records.filter((r) => {
     const matchesSearch =
       `${r.diagnosis} ${r.treatment} ${r.patient?.firstName} ${r.patient?.lastName}`
@@ -242,6 +232,7 @@ export default function DoctorMedicalRecords() {
     return matchesSearch && matchesPatient;
   });
 
+  // ── Add diagnosis / note ─────────────────────────────────────
   const handleAddDiagnosis = async () => {
     if (!newRecord.patientId) {
       toast({
@@ -265,7 +256,9 @@ export default function DoctorMedicalRecords() {
     const selectedPatient = patients.find(
       (item) => item.id === newRecord.patientId,
     );
+
     try {
+      // ✅ POST /api/MedicalRecords/create
       const result = await medicalRecordService.create({
         appointmentId: selectedAppointment.id,
         patientId: newRecord.patientId,
@@ -281,7 +274,10 @@ export default function DoctorMedicalRecords() {
         patient: result.data.patient || selectedPatient,
         doctor: result.data.doctor || selectedAppointment.doctor,
         doctorId:
-          result.data.doctorId || selectedAppointment.doctorId || user?.id || "",
+          result.data.doctorId ||
+          selectedAppointment.doctorId ||
+          user?.id ||
+          "",
       };
 
       setRecords((prev) => [createdRecord, ...prev]);
@@ -298,7 +294,7 @@ export default function DoctorMedicalRecords() {
         toothNumber: "",
       });
     } catch (error) {
-      console.error("Failed to create medical record:", error);
+      console.error("[DoctorMedicalRecords] Failed to create record:", error);
       toast({
         title: "Error",
         description: "Failed to save medical record.",
@@ -307,50 +303,51 @@ export default function DoctorMedicalRecords() {
     }
   };
 
+  // ── Add prescription ─────────────────────────────────────────
   const handleAddPrescription = async () => {
+    if (!newPrescription.patientId) {
+      toast({
+        title: "Missing patient",
+        description: "Select a patient before creating a prescription.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selectedMedicine = medicines.find(
+      (item) => item.id === newPrescription.medicineId,
+    );
+    if (!selectedMedicine) {
+      toast({
+        title: "Missing medicine",
+        description: "Select a medicine before creating a prescription.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const selectedAppointment =
+      latestAppointmentByPatient[newPrescription.patientId];
+    if (!selectedAppointment?.id) {
+      toast({
+        title: "No appointment found",
+        description: "A linked appointment is required before prescribing.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const parsedAppointmentId = parseNumericId(selectedAppointment.id);
+    if (parsedAppointmentId === null) {
+      toast({
+        title: "Invalid appointment ID",
+        description: "Unable to send prescription with the selected record.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      if (!newPrescription.patientId) {
-        toast({
-          title: "Missing patient",
-          description: "Select a patient before creating a prescription.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const selectedMedicine = medicines.find(
-        (item) => item.id === newPrescription.medicineId,
-      );
-      if (!selectedMedicine) {
-        toast({
-          title: "Missing medicine",
-          description: "Select a medicine before creating a prescription.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const selectedAppointment =
-        latestAppointmentByPatient[newPrescription.patientId];
-      if (!selectedAppointment?.id) {
-        toast({
-          title: "No appointment found",
-          description: "A linked appointment is required before prescribing.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      const parsedAppointmentId = parseNumericId(selectedAppointment.id);
-      if (parsedAppointmentId === null) {
-        toast({
-          title: "Invalid appointment ID",
-          description: "Unable to send prescription with the selected record.",
-          variant: "destructive",
-        });
-        return;
-      }
-
       await prescriptionService.create({
         appointmentId: parsedAppointmentId,
         medicines: [
@@ -368,6 +365,7 @@ export default function DoctorMedicalRecords() {
       const selectedPatient = patients.find(
         (item) => item.id === newPrescription.patientId,
       );
+
       const prescriptionRecord: MedicalRecord = {
         id: `record-prescription-${Date.now()}`,
         appointmentId: selectedAppointment.id,
@@ -377,7 +375,7 @@ export default function DoctorMedicalRecords() {
         patient: selectedPatient,
         date: new Date().toISOString(),
         type: "prescription",
-        diagnosis: selectedMedicine?.name || "Prescription",
+        diagnosis: selectedMedicine.name,
         treatment: "Medication plan created",
         notes: newPrescription.instructions || "No additional instructions.",
         toothNumber: undefined,
@@ -400,7 +398,10 @@ export default function DoctorMedicalRecords() {
         instructions: "",
       });
     } catch (error) {
-      console.error("Failed to create prescription:", error);
+      console.error(
+        "[DoctorMedicalRecords] Failed to create prescription:",
+        error,
+      );
       toast({
         title: "Error",
         description: "Failed to create prescription.",
@@ -416,6 +417,7 @@ export default function DoctorMedicalRecords() {
     note: FileText,
   };
 
+  // ── Render ──────────────────────────────────────────────────
   return (
     <DashboardLayout role="doctor">
       <div className="space-y-6">
@@ -432,6 +434,8 @@ export default function DoctorMedicalRecords() {
               View and manage patient medical records
             </p>
           </div>
+
+          {/* ── Add Record Dialog ── */}
           <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
             <DialogTrigger asChild>
               <Button className="gradient-bg border-0">
@@ -462,6 +466,7 @@ export default function DoctorMedicalRecords() {
                     </TabsTrigger>
                   </TabsList>
 
+                  {/* ── Diagnosis tab ── */}
                   <TabsContent value="diagnosis" className="space-y-4">
                     <div className="space-y-2">
                       <Label>Patient</Label>
@@ -542,6 +547,7 @@ export default function DoctorMedicalRecords() {
                     </Button>
                   </TabsContent>
 
+                  {/* ── Prescription tab ── */}
                   <TabsContent value="prescription" className="space-y-4">
                     <div className="space-y-2">
                       <Label>Patient</Label>
@@ -651,6 +657,7 @@ export default function DoctorMedicalRecords() {
                     </Button>
                   </TabsContent>
 
+                  {/* ── Note tab ── */}
                   <TabsContent value="note" className="space-y-4">
                     <div className="space-y-2">
                       <Label>Patient</Label>
@@ -696,7 +703,7 @@ export default function DoctorMedicalRecords() {
           </Dialog>
         </motion.div>
 
-        {/* Search & Filter */}
+        {/* ── Search & Filter ── */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -722,7 +729,7 @@ export default function DoctorMedicalRecords() {
           </Select>
         </div>
 
-        {/* Records List */}
+        {/* ── Records List ── */}
         <Card>
           <CardContent className="pt-6">
             {isLoading ? (
@@ -733,11 +740,12 @@ export default function DoctorMedicalRecords() {
                   const Icon = typeIcons[record.type] || FileText;
                   return (
                     <motion.div
-                      key={record.id}
+                      key={record.id || record.appointmentId || `record-${index}`}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
-                      className="flex items-start gap-4 p-4 rounded-xl border border-border hover:shadow-card transition-all"
+                      className="flex items-start gap-4 p-4 rounded-xl border border-border hover:shadow-card transition-all cursor-pointer"
+                      onClick={() => handleOpenDetail(record)}
                     >
                       <div className="p-2.5 rounded-xl bg-primary/10 text-primary shrink-0">
                         <Icon className="w-5 h-5" />
@@ -763,8 +771,8 @@ export default function DoctorMedicalRecords() {
                           <Avatar className="h-6 w-6">
                             <AvatarImage src={record.patient?.avatar} />
                             <AvatarFallback className="text-[10px]">
-                              {record.patient?.firstName[0]}
-                              {record.patient?.lastName[0]}
+                              {record.patient?.firstName?.[0]}
+                              {record.patient?.lastName?.[0]}
                             </AvatarFallback>
                           </Avatar>
                           <span className="text-xs text-muted-foreground">
@@ -801,6 +809,93 @@ export default function DoctorMedicalRecords() {
             )}
           </CardContent>
         </Card>
+
+        {/* ── Record Detail Dialog ── */}
+        <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+          <DialogContent className="max-w-lg max-h-[85vh]">
+            <DialogHeader>
+              <DialogTitle className="font-display">Record Details</DialogTitle>
+            </DialogHeader>
+
+            {detailLoading ? (
+              <div className="flex justify-center items-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : detailRecord ? (
+              <ScrollArea className="max-h-[65vh] pr-4">
+                <div className="space-y-5">
+                  {/* Patient info */}
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={detailRecord.patient?.avatar} />
+                      <AvatarFallback>
+                        {detailRecord.patient?.firstName?.[0]}
+                        {detailRecord.patient?.lastName?.[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium text-foreground text-sm">
+                        {detailRecord.patient?.firstName}{" "}
+                        {detailRecord.patient?.lastName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(detailRecord.date).toLocaleDateString(
+                          "en-US",
+                          {
+                            weekday: "long",
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          },
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      Diagnosis
+                    </h4>
+                    <p className="text-sm text-foreground">
+                      {detailRecord.diagnosis || "—"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      Treatment
+                    </h4>
+                    <p className="text-sm text-foreground">
+                      {detailRecord.treatment || "—"}
+                    </p>
+                  </div>
+
+                  {detailRecord.toothNumber && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                        Tooth Number
+                      </h4>
+                      <Badge variant="outline">
+                        {detailRecord.toothNumber}
+                      </Badge>
+                    </div>
+                  )}
+
+                  <div>
+                    <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                      Notes
+                    </h4>
+                    <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                      {detailRecord.notes || "No additional notes."}
+                    </p>
+                  </div>
+                </div>
+              </ScrollArea>
+            ) : null}
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

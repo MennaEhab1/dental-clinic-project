@@ -34,7 +34,6 @@ import {
   Notebook,
   Pill,
   Eye,
-  Pencil,
 } from "lucide-react";
 import {
   appointmentCareService,
@@ -42,6 +41,7 @@ import {
   medicalRecordService,
   pharmacyService,
   prescriptionService,
+  isBackendMedicalRecordId,
 } from "@/services/api";
 import type { Appointment, MedicalRecord, Medicine } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -102,17 +102,10 @@ const prescriptionFieldConfig: Array<{
 ];
 
 // Swagger does not currently provide a MedicalRecord DTO, so these are inferred from MedicalRecord usage in this project.
-const medicalRecordFieldConfig: Array<{
-  key: keyof MedicalRecordFormState;
-  label: string;
-  type: "text" | "textarea" | "select";
-}> = [
-  { key: "type", label: "Record Type", type: "select" },
+const medicalRecordFieldConfig = [
   { key: "diagnosis", label: "Diagnosis", type: "text" },
-  { key: "treatment", label: "Treatment", type: "textarea" },
   { key: "notes", label: "Notes", type: "textarea" },
-  { key: "toothNumber", label: "Tooth Number", type: "text" },
-];
+] as const;
 
 function parseNumericId(value: string): number | null {
   const raw = String(value || "").trim();
@@ -187,9 +180,7 @@ export default function DoctorAppointments() {
     useState<MedicalRecordFormState>(initialMedicalRecordForm);
   const [selectedMedicalRecord, setSelectedMedicalRecord] =
     useState<MedicalRecord | null>(null);
-  const [editingMedicalRecordId, setEditingMedicalRecordId] = useState<
-    string | null
-  >(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   const [actioningAppointmentId, setActioningAppointmentId] = useState<
     string | null
@@ -339,22 +330,30 @@ export default function DoctorAppointments() {
     setActiveAppointmentForAction(appointment);
     setMedicalRecordForm(initialMedicalRecordForm);
     setSelectedMedicalRecord(null);
-    setEditingMedicalRecordId(null);
     setRecordsDialogOpen(true);
     setIsLoadingRecords(true);
 
     try {
-      const response = await medicalRecordService.getByPatient(
-        appointment.patientId,
-      );
+      const response = await medicalRecordService.getMyCreatedRecords();
+      const patientRecords = (response.data || []).filter((record) => {
+        if (record.patientId && record.patientId === appointment.patientId) {
+          return true;
+        }
+        const recordAppointmentId = record.appointmentId;
+        return !!recordAppointmentId && recordAppointmentId === appointment.id;
+      });
+
       setRecordsByPatient((previous) => ({
         ...previous,
-        [appointment.patientId]: response.data || [],
+        [appointment.patientId]: patientRecords.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+        ),
       }));
-    } catch {
+    } catch (error) {
+      console.error("Failed to load medical records:", error);
       setRecordsByPatient((previous) => ({
         ...previous,
-        [appointment.patientId]: previous[appointment.patientId] || [],
+        [appointment.patientId]: [],
       }));
     } finally {
       setIsLoadingRecords(false);
@@ -521,45 +520,35 @@ export default function DoctorAppointments() {
 
     setIsSubmittingRecord(true);
     try {
-      const payload = {
+      const response = await medicalRecordService.create({
         appointmentId: activeAppointmentForAction.id,
-        patientId: activeAppointmentForAction.patientId,
+        patientId:
+          activeAppointmentForAction.patient?.id ??
+          activeAppointmentForAction.patientId,
         diagnosis: medicalRecordForm.diagnosis,
         treatment: medicalRecordForm.treatment,
         notes: medicalRecordForm.notes,
         toothNumber: medicalRecordForm.toothNumber || undefined,
         type: medicalRecordForm.type,
-      };
-      const response = editingMedicalRecordId
-        ? await medicalRecordService.update({
-            id: editingMedicalRecordId,
-            ...payload,
-          })
-        : await medicalRecordService.create(payload);
+      });
 
       setRecordsByPatient((previous) => {
         const current = previous[activeAppointmentForAction.patientId] || [];
         return {
           ...previous,
-          [activeAppointmentForAction.patientId]: editingMedicalRecordId
-            ? current.map((record) =>
-                record.id === editingMedicalRecordId ? response.data : record,
-              )
-            : [response.data, ...current],
+          [activeAppointmentForAction.patientId]: [
+            response.data,
+            ...current.filter((record) => record.id !== response.data.id),
+          ],
         };
       });
 
       toast({
-        title: editingMedicalRecordId
-          ? "Medical record updated"
-          : "Medical record saved",
-        description: editingMedicalRecordId
-          ? "Changes were saved successfully."
-          : "Patient record has been updated.",
+        title: "Medical record saved",
+        description: "Patient record has been updated.",
       });
       setMedicalRecordForm(initialMedicalRecordForm);
       setSelectedMedicalRecord(response.data);
-      setEditingMedicalRecordId(null);
     } catch (error) {
       console.error("Failed to save medical record:", error);
       toast({
@@ -572,21 +561,26 @@ export default function DoctorAppointments() {
     }
   };
 
-  const handleViewMedicalRecord = (record: MedicalRecord) => {
+  const handleViewMedicalRecord = async (record: MedicalRecord) => {
     setSelectedMedicalRecord(record);
-    setEditingMedicalRecordId(null);
-  };
 
-  const handleEditMedicalRecord = (record: MedicalRecord) => {
-    setSelectedMedicalRecord(record);
-    setEditingMedicalRecordId(record.id);
-    setMedicalRecordForm({
-      type: record.type,
-      diagnosis: record.diagnosis,
-      treatment: record.treatment,
-      notes: record.notes,
-      toothNumber: record.toothNumber || "",
-    });
+    if (!isBackendMedicalRecordId(record.id)) return;
+
+    setDetailsLoading(true);
+    try {
+      const response = await medicalRecordService.getById(record.id);
+      if (response.success && response.data) {
+        setSelectedMedicalRecord({
+          ...response.data,
+          patient: response.data.patient ?? record.patient,
+          doctor: response.data.doctor ?? record.doctor,
+        });
+      }
+    } catch {
+      // Keep list-level data on failure.
+    } finally {
+      setDetailsLoading(false);
+    }
   };
 
   const activePatientRecords = useMemo(() => {
@@ -1006,9 +1000,7 @@ export default function DoctorAppointments() {
             <div className="space-y-5">
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">
-                    {editingMedicalRecordId ? "Edit Record" : "Add Record"}
-                  </CardTitle>
+                  <CardTitle className="text-sm">Add Record</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {medicalRecordFieldConfig.map((field) => (
@@ -1063,24 +1055,8 @@ export default function DoctorAppointments() {
                     disabled={isSubmittingRecord}
                     onClick={handleSubmitMedicalRecord}
                   >
-                    {isSubmittingRecord
-                      ? "Saving..."
-                      : editingMedicalRecordId
-                        ? "Update Medical Record"
-                        : "Save Medical Record"}
+                    {isSubmittingRecord ? "Saving..." : "Save Medical Record"}
                   </Button>
-                  {editingMedicalRecordId && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setEditingMedicalRecordId(null);
-                        setMedicalRecordForm(initialMedicalRecordForm);
-                      }}
-                    >
-                      Cancel Edit
-                    </Button>
-                  )}
                 </CardContent>
               </Card>
 
@@ -1090,6 +1066,10 @@ export default function DoctorAppointments() {
                     <CardTitle className="text-sm">Record Details</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
+                    {detailsLoading ? (
+                      <p className="text-muted-foreground">Loading details...</p>
+                    ) : (
+                      <>
                     <div>
                       <span className="font-medium">Type:</span>{" "}
                       <span className="capitalize">
@@ -1116,6 +1096,8 @@ export default function DoctorAppointments() {
                       <span className="font-medium">Date:</span>{" "}
                       {new Date(selectedMedicalRecord.date).toLocaleString()}
                     </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               )}
@@ -1162,14 +1144,6 @@ export default function DoctorAppointments() {
                               onClick={() => handleViewMedicalRecord(record)}
                             >
                               <Eye className="w-3.5 h-3.5 mr-1" /> View Details
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleEditMedicalRecord(record)}
-                            >
-                              <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
                             </Button>
                           </div>
                         </div>

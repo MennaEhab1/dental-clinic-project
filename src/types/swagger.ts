@@ -1,6 +1,6 @@
 // Generated TypeScript models from Swagger (SmartTeethCare.API)
 // Partial: includes commonly-used request/response DTOs.
-
+//swagger.ts file
 export type ApiAppointmentStatus = 0 | 1 | 2 | 3 | 4;
 
 export interface BookAppointmentDto {
@@ -102,6 +102,45 @@ export interface PrescriptionDetailsDTO {
   patientName?: string | null;
   medicines?: PrescriptionMedicineDetailsDto[] | null;
 }
+// ============================================================
+// أضيفي الـ types دي في swagger.ts بتاعتك
+// ============================================================
+
+// ---- Request DTOs ----
+
+export interface CreateMedicalRecordDto {
+  appointmentId: number;
+  diagnosis?: string | null;
+  notes?: string | null;
+}
+
+export interface UpdateMedicalRecordRequest {
+  id: string;
+  appointmentId: number;
+  diagnosis: string;
+  notes?: string | null;
+  toothNumber?: string | null;
+  type?: string | null;
+}
+
+// ---- Response DTOs ----
+
+// ما بيرجعه GET /api/MedicalRecords/my-records  (array)
+// وكمان GET /api/MedicalRecords/details/{id}     (object واحد)
+export interface MedicalRecordViewDto {
+  id?: number | null;
+  appointmentId?: number | null;
+  patientId?: number | null;
+  patientName?: string | null;
+  doctorId?: number | null;
+  doctorName?: string | null;
+  date?: string | null; // date-time
+  type?: string | null; // "diagnosis" | "treatment" | "prescription" | "note"
+  diagnosis?: string | null;
+  treatment?: string | null;
+  notes?: string | null;
+  toothNumber?: string | null;
+}
 
 // Export a consolidated namespace for convenience
 export const SwaggerTypes = {
@@ -114,6 +153,10 @@ export const SwaggerTypes = {
   UserDTO: undefined as unknown as UserDTO,
   CreatePrescriptionDto: undefined as unknown as CreatePrescriptionDto,
   PrescriptionDetailsDTO: undefined as unknown as PrescriptionDetailsDTO,
+  CreateMedicalRecordDto: undefined as unknown as CreateMedicalRecordDto,
+  MedicalRecordViewDto: undefined as unknown as MedicalRecordViewDto,
+  UpdateMedicalRecordRequest:
+    undefined as unknown as UpdateMedicalRecordRequest,
 };
 
 export default SwaggerTypes;

@@ -1,9 +1,14 @@
+// PatientMedicalRecords.tsx
+// ✅ محدّث ليستخدم GET /api/MedicalRecords/my-records
+// ✅ لو الـ user ضغط على record بيعمل GET /api/MedicalRecords/details/{id}
+// ✅ الـ prescription data جاية من الـ my-records مباشرة (لو الـ backend بيرجعها)
+//    أو من prescriptionService.getByAppointment كـ fallback
+
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
-import { StatusBadge } from "@/components/dashboard/StatusBadge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,17 +30,17 @@ import {
   Eye,
   Download,
   Activity,
+  Loader2,
 } from "lucide-react";
 import type { MedicalRecord, Prescription } from "@/types";
-import {
-  appointmentService,
-  authService,
-  medicalRecordService,
-  prescriptionService,
-} from "@/services/api";
+import { medicalRecordService, prescriptionService, isBackendMedicalRecordId } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "@/hooks/use-toast";
 import type { PrescriptionDetailsDTO } from "@/types/swagger";
 
+// ──────────────────────────────────────────────────────────────
+// Helper: extract appointmentId from PrescriptionDetailsDTO
+// ──────────────────────────────────────────────────────────────
 function extractAppointmentIdFromPrescription(
   prescription: PrescriptionDetailsDTO,
 ): string | null {
@@ -47,6 +52,9 @@ function extractAppointmentIdFromPrescription(
   return String(raw);
 }
 
+// ──────────────────────────────────────────────────────────────
+// Helpers: doctor display
+// ──────────────────────────────────────────────────────────────
 function toDoctorDisplayName(record: MedicalRecord): string {
   const first = record.doctor?.firstName?.trim();
   const last = record.doctor?.lastName?.trim();
@@ -60,36 +68,9 @@ function toDoctorInitials(record: MedicalRecord): string {
   return `${firstInitial}${lastInitial}`.toUpperCase();
 }
 
-function mapDoctorNameToRecord(rawDoctorName: string): MedicalRecord["doctor"] {
-  const normalized = rawDoctorName.replace(/^\s*dr\.?\s+/i, "").trim();
-  if (!normalized) return undefined;
-
-  const [firstName = "Doctor", ...rest] = normalized
-    .split(/\s+/)
-    .filter(Boolean);
-  const lastName = rest.join(" ");
-  return {
-    id: `doctor-${normalized.toLowerCase().replace(/\s+/g, "-")}`,
-    email: "",
-    firstName,
-    lastName,
-    phone: "",
-    avatar: "",
-    role: "doctor",
-    specialty: "general",
-    qualifications: [],
-    experience: 0,
-    bio: "",
-    consultationFee: 0,
-    rating: 0,
-    reviewCount: 0,
-    availableSlots: [],
-    workingDays: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-}
-
+// ──────────────────────────────────────────────────────────────
+// Helper: map PrescriptionDetailsDTO → Prescription
+// ──────────────────────────────────────────────────────────────
 function mapPrescriptionDtoToPrescription(
   dto: PrescriptionDetailsDTO,
   appointmentId: string,
@@ -116,10 +97,8 @@ function mapPrescriptionDtoToPrescription(
   }));
 
   const instructions = (dto.medicines || [])
-    .map((medicine) => medicine.instructions)
-    .filter((value): value is string =>
-      Boolean(value && value.trim().length > 0),
-    )
+    .map((m) => m.instructions)
+    .filter((v): v is string => Boolean(v && v.trim().length > 0))
     .join(" • ");
 
   return {
@@ -131,37 +110,9 @@ function mapPrescriptionDtoToPrescription(
   };
 }
 
-function mapAppointmentsToRecords(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  appointments: any[],
-): MedicalRecord[] {
-  return appointments.map((appointment) => ({
-    id: `record-${appointment.id}`,
-    appointmentId: String(appointment.id),
-    patientId: appointment.patientId,
-    doctorId: appointment.doctorId,
-    doctor: appointment.doctor,
-    patient: appointment.patient,
-    date: appointment.date,
-    type:
-      appointment.recordType ||
-      (appointment.prescription ? "prescription" : "treatment"),
-    diagnosis:
-      appointment.recordDiagnosis ||
-      appointment.service?.name ||
-      "Dental consultation",
-    treatment:
-      appointment.recordTreatment ||
-      appointment.notes ||
-      "Follow-up and treatment plan",
-    notes:
-      appointment.recordNotes || appointment.notes || "No additional notes.",
-    toothNumber: appointment.recordToothNumber || undefined,
-    attachments: [],
-    prescription: appointment.prescription,
-  }));
-}
-
+// ──────────────────────────────────────────────────────────────
+// Component
+// ──────────────────────────────────────────────────────────────
 export default function PatientMedicalRecords() {
   const [records, setRecords] = useState<MedicalRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -169,146 +120,64 @@ export default function PatientMedicalRecords() {
     null,
   );
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const { user } = useAuth();
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const { user, isLoading: authLoading } = useAuth();
 
+  // ── Fetch all records using /my-records ─────────────────────
   useEffect(() => {
-    const fetchRecords = async () => {
-      try {
-        const appointmentsRes = await appointmentService.getByPatient();
-        // Keep ALL appointments so we can resolve patientId even if none are complete
-        const allAppointments = appointmentsRes.data || [];
-        // Only completed appointments are used to build medical record cards
-        const appointments = allAppointments.filter(
-          (appointment) => appointment.status === "complete",
-        );
+    if (authLoading) return;
 
+    const fetchRecords = async () => {
+      setIsLoading(true);
+      try {
+        // 1️⃣  Primary: GET /api/MedicalRecords/my-records (JWT-resolved)
+        const recordsRes = await medicalRecordService.getByPatient();
+        if (!recordsRes.success) {
+          toast({
+            title: "Could not load records",
+            description:
+              recordsRes.message ||
+              "Unable to fetch your medical records from the server.",
+            variant: "destructive",
+          });
+        }
+        let baseRecords = recordsRes.data || [];
+
+        // 2️⃣  Enrich with prescriptions for any record that has an appointmentId
+        //     but no prescription yet (graceful — if the endpoint fails we still render)
         const prescriptionMap = new Map<string, Prescription>();
-        const prescriptionDoctorMap = new Map<
-          string,
-          MedicalRecord["doctor"]
-        >();
+
         try {
           const prescriptionsRes =
             await prescriptionService.getMyPrescriptions();
           (prescriptionsRes.data || []).forEach((dto) => {
-            const appointmentId = extractAppointmentIdFromPrescription(dto);
-            if (!appointmentId) return;
-
+            const apptId = extractAppointmentIdFromPrescription(dto);
+            if (!apptId) return;
             prescriptionMap.set(
-              appointmentId,
-              mapPrescriptionDtoToPrescription(dto, appointmentId),
+              apptId,
+              mapPrescriptionDtoToPrescription(dto, apptId),
             );
-            if (dto.doctorName) {
-              prescriptionDoctorMap.set(
-                appointmentId,
-                mapDoctorNameToRecord(dto.doctorName),
-              );
-            }
           });
         } catch {
-          // If prescriptions endpoint fails, still show medical records from appointments
+          // prescriptions endpoint unavailable — carry on without
         }
 
-        await Promise.all(
-          appointments
-            .filter(
-              (appointment) => !prescriptionMap.has(String(appointment.id)),
-            )
-            .map(async (appointment) => {
-              try {
-                const prescriptionRes =
-                  await prescriptionService.getByAppointment(
-                    String(appointment.id),
-                  );
-                const dto = prescriptionRes.data;
-                if (!dto?.medicines || dto.medicines.length === 0) return;
+        // Attach prescription to matching records
+        baseRecords = baseRecords.map((record) => {
+          if (record.prescription) return record; // already has prescription from backend
+          if (!record.appointmentId) return record;
+          const prescription = prescriptionMap.get(record.appointmentId);
+          return prescription ? { ...record, prescription } : record;
+        });
 
-                const appointmentId =
-                  extractAppointmentIdFromPrescription(dto) ||
-                  String(appointment.id);
-                prescriptionMap.set(
-                  appointmentId,
-                  mapPrescriptionDtoToPrescription(dto, appointmentId),
-                );
-                if (dto.doctorName) {
-                  prescriptionDoctorMap.set(
-                    appointmentId,
-                    mapDoctorNameToRecord(dto.doctorName),
-                  );
-                }
-              } catch {
-                // Keep rendering even when prescription details endpoint is unavailable
-              }
-            }),
+        // Sort newest first
+        baseRecords.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
         );
 
-        const appointmentRecordDetails = new Map<string, MedicalRecord>();
-        const standaloneMedicalRecords: MedicalRecord[] = [];
-        // Resolve patientId: prefer completed appointments, fall back to any
-        // appointment, then fall back to the JWT token claim so medical records
-        // are still fetched even when the patient has no completed appointments.
-        const patientId =
-          appointments[0]?.patientId ||
-          allAppointments[0]?.patientId ||
-          authService.getCurrentUserIdFromToken();
-        if (patientId) {
-          try {
-            const medicalRecordsResponse =
-              await medicalRecordService.getByPatient(String(patientId));
-            (medicalRecordsResponse.data || []).forEach((record) => {
-              if (record.appointmentId) {
-                appointmentRecordDetails.set(record.appointmentId, record);
-                return;
-              }
-
-              standaloneMedicalRecords.push(record);
-            });
-          } catch {
-            // Keep rendering appointment-based records when medical records endpoint is unavailable
-          }
-        }
-
-        const recordsWithPrescriptions = appointments.map((appointment) => ({
-          ...appointment,
-          doctor:
-            appointment.doctor ||
-            appointmentRecordDetails.get(String(appointment.id))?.doctor ||
-            prescriptionDoctorMap.get(String(appointment.id)),
-          recordType: appointmentRecordDetails.get(String(appointment.id))
-            ?.type,
-          recordDiagnosis: appointmentRecordDetails.get(String(appointment.id))
-            ?.diagnosis,
-          recordTreatment: appointmentRecordDetails.get(String(appointment.id))
-            ?.treatment,
-          recordNotes: appointmentRecordDetails.get(String(appointment.id))
-            ?.notes,
-          recordToothNumber: appointmentRecordDetails.get(
-            String(appointment.id),
-          )?.toothNumber,
-          prescription: prescriptionMap.get(String(appointment.id)),
-        }));
-
-        const appointmentDerivedRecords = mapAppointmentsToRecords(
-          recordsWithPrescriptions,
-        );
-
-        const mergedRecords = [
-          ...standaloneMedicalRecords,
-          ...appointmentDerivedRecords,
-        ]
-          .map((record) => ({
-            ...record,
-            diagnosis: record.diagnosis || "Medical record",
-            treatment: record.treatment || "No treatment details provided.",
-            notes: record.notes || "No additional notes.",
-          }))
-          .sort(
-            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-          );
-
-        setRecords(mergedRecords);
+        setRecords(baseRecords);
       } catch (error) {
-        console.error("Failed to load medical records:", error);
+        console.error("[PatientMedicalRecords] Failed to load records:", error);
         setRecords([]);
       } finally {
         setIsLoading(false);
@@ -316,8 +185,35 @@ export default function PatientMedicalRecords() {
     };
 
     fetchRecords();
-  }, [user]);
+  }, [user, authLoading]);
 
+  // ── Open detail dialog ──────────────────────────────────────
+  const handleOpenDetails = async (record: MedicalRecord) => {
+    setSelectedRecord(record);
+    setDetailsOpen(true);
+
+    // Fetch detailed view from /details/{id} to get the latest data
+    if (isBackendMedicalRecordId(record.id)) {
+      setDetailsLoading(true);
+      try {
+        const res = await medicalRecordService.getById(record.id);
+        if (res.success && res.data) {
+          // Preserve prescription if the detail endpoint doesn't return it
+          const enriched = {
+            ...res.data,
+            prescription: res.data.prescription ?? record.prescription,
+          };
+          setSelectedRecord(enriched);
+        }
+      } catch {
+        // Keep showing the list-level data on failure
+      } finally {
+        setDetailsLoading(false);
+      }
+    }
+  };
+
+  // ── Derived lists ───────────────────────────────────────────
   const diagnoses = records.filter((r) => r.type === "diagnosis");
   const treatments = records.filter((r) => r.type === "treatment");
   const prescriptions = records.filter((r) => r.prescription);
@@ -329,6 +225,7 @@ export default function PatientMedicalRecords() {
     note: FileText,
   };
 
+  // ── Sub-component: RecordCard ────────────────────────────────
   const RecordCard = ({ record }: { record: MedicalRecord }) => {
     const Icon = typeIcon[record.type] || FileText;
     return (
@@ -336,10 +233,7 @@ export default function PatientMedicalRecords() {
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         className="p-4 rounded-xl border border-border hover:shadow-card transition-all cursor-pointer"
-        onClick={() => {
-          setSelectedRecord(record);
-          setDetailsOpen(true);
-        }}
+        onClick={() => handleOpenDetails(record)}
       >
         <div className="flex items-start gap-4">
           <div className="p-2.5 rounded-xl bg-primary/10 text-primary shrink-0">
@@ -349,10 +243,10 @@ export default function PatientMedicalRecords() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="font-semibold text-foreground text-sm">
-                  {record.diagnosis}
+                  {record.diagnosis || "Medical record"}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {record.treatment}
+                  {record.treatment || "No treatment details provided."}
                 </p>
               </div>
               <Badge
@@ -385,6 +279,7 @@ export default function PatientMedicalRecords() {
     );
   };
 
+  // ── Render ──────────────────────────────────────────────────
   return (
     <DashboardLayout role="patient">
       <div className="space-y-6">
@@ -416,38 +311,32 @@ export default function PatientMedicalRecords() {
             </TabsTrigger>
           </TabsList>
 
-          {["all", "treatments", "diagnoses", "prescriptions"].map((tab) => (
-            <TabsContent key={tab} value={tab}>
+          {(
+            [
+              { value: "all", data: records },
+              { value: "treatments", data: treatments },
+              { value: "diagnoses", data: diagnoses },
+              { value: "prescriptions", data: prescriptions },
+            ] as const
+          ).map(({ value, data }) => (
+            <TabsContent key={value} value={value}>
               <Card>
                 <CardContent className="pt-6">
                   {isLoading ? (
                     <LoadingCard />
-                  ) : (
+                  ) : data.length > 0 ? (
                     <div className="space-y-3">
-                      {(tab === "all"
-                        ? records
-                        : tab === "treatments"
-                          ? treatments
-                          : tab === "diagnoses"
-                            ? diagnoses
-                            : prescriptions
-                      ).length > 0 ? (
-                        (tab === "all"
-                          ? records
-                          : tab === "treatments"
-                            ? treatments
-                            : tab === "diagnoses"
-                              ? diagnoses
-                              : prescriptions
-                        ).map((record) => (
-                          <RecordCard key={record.id} record={record} />
-                        ))
-                      ) : (
-                        <p className="text-center text-muted-foreground py-8">
-                          No records found
-                        </p>
-                      )}
+                      {data.map((record, index) => (
+                        <RecordCard
+                          key={record.id || record.appointmentId || `record-${index}`}
+                          record={record}
+                        />
+                      ))}
                     </div>
+                  ) : (
+                    <p className="text-center text-muted-foreground py-8">
+                      No records found
+                    </p>
                   )}
                 </CardContent>
               </Card>
@@ -455,15 +344,21 @@ export default function PatientMedicalRecords() {
           ))}
         </Tabs>
 
-        {/* Record Details Dialog */}
+        {/* ── Record Details Dialog ── */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
           <DialogContent className="max-w-lg max-h-[85vh]">
             <DialogHeader>
               <DialogTitle className="font-display">Record Details</DialogTitle>
             </DialogHeader>
-            {selectedRecord && (
+
+            {detailsLoading ? (
+              <div className="flex justify-center items-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : selectedRecord ? (
               <ScrollArea className="max-h-[65vh] pr-4">
                 <div className="space-y-5">
+                  {/* Doctor + date */}
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={selectedRecord.doctor?.avatar} />
@@ -491,24 +386,27 @@ export default function PatientMedicalRecords() {
 
                   <Separator />
 
+                  {/* Diagnosis */}
                   <div>
                     <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                       Diagnosis
                     </h4>
                     <p className="text-sm text-foreground">
-                      {selectedRecord.diagnosis}
+                      {selectedRecord.diagnosis || "—"}
                     </p>
                   </div>
 
+                  {/* Treatment */}
                   <div>
                     <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                       Treatment
                     </h4>
                     <p className="text-sm text-foreground">
-                      {selectedRecord.treatment}
+                      {selectedRecord.treatment || "—"}
                     </p>
                   </div>
 
+                  {/* Tooth number */}
                   {selectedRecord.toothNumber && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -520,15 +418,17 @@ export default function PatientMedicalRecords() {
                     </div>
                   )}
 
+                  {/* Notes */}
                   <div>
                     <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                       Doctor's Notes
                     </h4>
                     <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
-                      {selectedRecord.notes}
+                      {selectedRecord.notes || "No additional notes."}
                     </p>
                   </div>
 
+                  {/* Prescription */}
                   {selectedRecord.prescription && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -566,6 +466,7 @@ export default function PatientMedicalRecords() {
                     </div>
                   )}
 
+                  {/* Attachments */}
                   {selectedRecord.attachments &&
                     selectedRecord.attachments.length > 0 && (
                       <div>
@@ -612,7 +513,7 @@ export default function PatientMedicalRecords() {
                     )}
                 </div>
               </ScrollArea>
-            )}
+            ) : null}
           </DialogContent>
         </Dialog>
       </div>

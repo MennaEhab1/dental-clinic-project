@@ -68,8 +68,7 @@ export default function PatientAppointments() {
     }
 
     try {
-      const medicalRecordsResponse =
-        await medicalRecordService.getByPatient(patientId);
+      const medicalRecordsResponse = await medicalRecordService.getByPatient();
       const grouped = (medicalRecordsResponse.data || []).reduce<
         Record<string, MedicalRecord[]>
       >((acc, record) => {

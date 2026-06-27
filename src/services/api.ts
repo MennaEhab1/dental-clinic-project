@@ -11,6 +11,7 @@
  */
 
 import { ApiResponse, PaginatedResponse } from "@/types";
+// TODO :  امسح جزء ال mockdata
 import {
   mockDoctors,
   mockPatients,
@@ -47,6 +48,7 @@ import type {
   ResetPasswordDTO,
   RevokeTokenDTO,
   UpdatePatientProfileDto,
+  CreateMedicalRecordDto,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -1648,19 +1650,41 @@ function buildMedicalRecordPatientIdCandidates(patientId: string): string[] {
   return Array.from(candidates).filter(Boolean);
 }
 
-// Inferred from MedicalRecord usage in the app because Swagger does not include DTOs for these endpoints.
+// UI payload for POST /api/MedicalRecords/create (Swagger: appointmentId, diagnosis, notes only).
 export interface CreateMedicalRecordRequest {
-  appointmentId?: string;
-  patientId: string;
+  appointmentId: string;
+  patientId?: string;
   diagnosis: string;
-  treatment: string;
-  notes: string;
+  treatment?: string;
+  notes?: string;
   toothNumber?: string;
   type?: "diagnosis" | "treatment" | "prescription" | "note";
 }
 
-export interface UpdateMedicalRecordRequest extends CreateMedicalRecordRequest {
-  id: string;
+function extractApiArray(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    for (const key of ["data", "value", "items", "records", "result"]) {
+      const nested = obj[key];
+      if (Array.isArray(nested)) return nested;
+    }
+  }
+  return [];
+}
+
+function buildCreateMedicalRecordNotes(
+  data: CreateMedicalRecordRequest,
+): string | null {
+  const parts: string[] = [];
+  if (data.notes?.trim()) parts.push(data.notes.trim());
+  if (data.treatment?.trim()) parts.push(`Treatment: ${data.treatment.trim()}`);
+  if (data.toothNumber?.trim()) parts.push(`Tooth: ${data.toothNumber.trim()}`);
+  return parts.length > 0 ? parts.join("\n") : null;
+}
+
+export function isBackendMedicalRecordId(id: string): boolean {
+  return parseEntityNumericId(id) !== null && !id.startsWith("record-");
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1772,8 +1796,9 @@ function mapBackendToMedicalRecord(item: any): MedicalRecord {
     .toLowerCase()
     .trim();
 
+  const recordId = item.id ?? item.recordId ?? item.medicalRecordId;
   return {
-    id: String(item.id || item.recordId || `record-${Date.now()}`),
+    id: recordId != null && String(recordId).trim() !== "" ? String(recordId) : "",
     appointmentId:
       item.appointmentId != null
         ? String(item.appointmentId)
@@ -1847,147 +1872,133 @@ export const appointmentCareService = {
 };
 
 export const medicalRecordService = {
-  async getByPatient(patientId: string): Promise<ApiResponse<MedicalRecord[]>> {
-    const patientIdCandidates =
-      buildMedicalRecordPatientIdCandidates(patientId);
-    const patientIdCandidateSet = new Set(patientIdCandidates);
-
-    const local = readStoredMedicalRecords().filter((record) =>
-      patientIdCandidateSet.has(String(record.patientId || "").trim()),
-    );
-
-    const endpoints = patientIdCandidates.flatMap((candidateId) => [
-      `/api/MedicalRecords/patient/${candidateId}`,
-      `/api/MedicalRecord/patient/${candidateId}`,
-      `/api/MedicalRecord/Patient/${candidateId}`,
-    ]);
-
-    const backendRecords: MedicalRecord[] = [];
-    let hasBackendSuccess = false;
-
-    for (const endpoint of endpoints) {
-      try {
-        const res = await apiCall<unknown[]>(endpoint, { method: "GET" });
-        hasBackendSuccess = true;
-        const mapped = (res.data || []).map((item) =>
-          mapBackendToMedicalRecord(item),
-        );
-        backendRecords.push(...mapped);
-      } catch {
-        // Try the next endpoint candidate.
-      }
-    }
-
-    const seenRecordIds = new Set<string>();
-    const merged = [...backendRecords, ...local].filter((record) => {
-      const id = String(record.id || "").trim();
-      if (!id) return true;
-      if (seenRecordIds.has(id)) return false;
-      seenRecordIds.add(id);
-      return true;
-    });
-
-    if (!hasBackendSuccess && local.length === 0) {
+  /**
+   * GET /api/MedicalRecords/my-records — patient JWT resolves the patient.
+   */
+  async getByPatient(): Promise<ApiResponse<MedicalRecord[]>> {
+    try {
+      const res = await apiCall<unknown>("/api/MedicalRecords/my-records", {
+        method: "GET",
+      });
+      const records = extractApiArray(res.data).map((item) =>
+        mapBackendToMedicalRecord(item),
+      );
+      return { data: records, success: true };
+    } catch (error) {
+      console.error("[medicalRecordService.getByPatient] Error:", error);
       return {
         data: [],
         success: false,
-        message: "Failed to fetch medical records from backend",
+        message: "Failed to fetch medical records",
       };
     }
-
-    return { data: merged, success: true };
   },
 
+  /**
+   * GET /api/MedicalRecords/my-created-medical-records — doctor JWT resolves the doctor.
+   */
+  async getMyCreatedRecords(): Promise<ApiResponse<MedicalRecord[]>> {
+    try {
+      const res = await apiCall<unknown>(
+        "/api/MedicalRecords/my-created-medical-records",
+        { method: "GET" },
+      );
+      const records = extractApiArray(res.data).map((item) =>
+        mapBackendToMedicalRecord(item),
+      );
+      return { data: records, success: true };
+    } catch (error) {
+      console.error("[medicalRecordService.getMyCreatedRecords] Error:", error);
+      return {
+        data: [],
+        success: false,
+        message: "Failed to fetch created medical records",
+      };
+    }
+  },
+
+  /**
+   * GET /api/MedicalRecords/details/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<MedicalRecord>> {
+    const numericId = parseEntityNumericId(id);
+    if (!numericId) {
+      throw new Error(`Invalid medical record id: "${id}"`);
+    }
+
+    try {
+      const res = await apiCall<unknown>(
+        `/api/MedicalRecords/details/${numericId}`,
+        { method: "GET" },
+      );
+      return { data: mapBackendToMedicalRecord(res.data), success: true };
+    } catch (error) {
+      console.error("[medicalRecordService.getById] Error:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * POST /api/MedicalRecords/create
+   */
   async create(
     data: CreateMedicalRecordRequest,
   ): Promise<ApiResponse<MedicalRecord>> {
-    try {
-      const normalizedPatientId = parseEntityNumericId(data.patientId);
-      if (normalizedPatientId === null) {
-        throw new Error(
-          `Invalid patientId for medical record submission: "${data.patientId}"`,
-        );
-      }
-
-      const normalizedAppointmentId =
-        data.appointmentId && String(data.appointmentId).trim().length > 0
-          ? parseEntityNumericId(data.appointmentId)
-          : null;
-      if (
-        data.appointmentId &&
-        String(data.appointmentId).trim().length > 0 &&
-        normalizedAppointmentId === null
-      ) {
-        throw new Error(
-          `Invalid appointmentId for medical record submission: "${data.appointmentId}"`,
-        );
-      }
-
-      // Inferred payload shape from MedicalRecord interface fields used by existing pages.
-      const payload = {
-        appointmentId: normalizedAppointmentId,
-        patientId: normalizedPatientId,
-        diagnosis: data.diagnosis,
-        treatment: data.treatment,
-        notes: data.notes,
-        toothNumber: data.toothNumber || null,
-        type: data.type || "note",
-      };
-
-      // Inferred endpoint because Swagger does not currently expose medical record endpoints.
-      const res = await apiCall<unknown>("/api/MedicalRecord", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      return { data: mapBackendToMedicalRecord(res.data), success: true };
-    } catch (error) {
-      throw error;
+    const normalizedAppointmentId = parseEntityNumericId(data.appointmentId);
+    if (!normalizedAppointmentId) {
+      throw new Error(`Invalid appointmentId: "${data.appointmentId}"`);
     }
-  },
 
-  async update(
-    data: UpdateMedicalRecordRequest,
-  ): Promise<ApiResponse<MedicalRecord>> {
-    try {
-      const normalizedPatientId = parseEntityNumericId(data.patientId);
-      if (normalizedPatientId === null) {
-        throw new Error(
-          `Invalid patientId for medical record update: "${data.patientId}"`,
-        );
-      }
+    const payload: CreateMedicalRecordDto = {
+      appointmentId: normalizedAppointmentId,
+      diagnosis: data.diagnosis?.trim() || null,
+      notes: buildCreateMedicalRecordNotes(data),
+    };
 
-      const normalizedAppointmentId =
-        data.appointmentId && String(data.appointmentId).trim().length > 0
-          ? parseEntityNumericId(data.appointmentId)
-          : null;
-      if (
-        data.appointmentId &&
-        String(data.appointmentId).trim().length > 0 &&
-        normalizedAppointmentId === null
-      ) {
-        throw new Error(
-          `Invalid appointmentId for medical record update: "${data.appointmentId}"`,
-        );
-      }
+    const res = await apiCall<unknown>("/api/MedicalRecords/create", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
 
-      const payload = {
-        appointmentId: normalizedAppointmentId,
-        patientId: normalizedPatientId,
-        diagnosis: data.diagnosis,
-        treatment: data.treatment,
-        notes: data.notes,
-        toothNumber: data.toothNumber || null,
-        type: data.type || "note",
+    if (res.data && typeof res.data === "object" && !Array.isArray(res.data)) {
+      return {
+        data: mapBackendToMedicalRecord(res.data),
+        success: true,
       };
-
-      const res = await apiCall<unknown>(`/api/MedicalRecord/${data.id}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-      return { data: mapBackendToMedicalRecord(res.data), success: true };
-    } catch (error) {
-      throw error;
     }
+
+    // Backend often returns 200 with an empty body — refetch the doctor's records.
+    try {
+      const createdRes = await medicalRecordService.getMyCreatedRecords();
+      const matched = (createdRes.data || []).find((record) => {
+        const recordAppointmentId = parseEntityNumericId(
+          record.appointmentId || "",
+        );
+        return recordAppointmentId === normalizedAppointmentId;
+      });
+      if (matched?.id) {
+        return { data: matched, success: true };
+      }
+    } catch {
+      // Fall through to minimal local record.
+    }
+
+    return {
+      data: {
+        id: "",
+        appointmentId: String(normalizedAppointmentId),
+        patientId: data.patientId || "",
+        doctorId: "",
+        date: new Date().toISOString(),
+        type: data.type || "diagnosis",
+        diagnosis: data.diagnosis,
+        treatment: data.treatment || "",
+        notes: data.notes || "",
+        toothNumber: data.toothNumber,
+        attachments: [],
+      },
+      success: true,
+    };
   },
 };
 

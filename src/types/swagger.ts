@@ -114,6 +114,34 @@ export interface CreateMedicalRecordDto {
   notes?: string | null;
 }
 
+export interface AddReviewDTO {
+  doctorId: number;
+  appointmentId: number;
+  rating: number;
+  comment?: string | null;
+}
+
+export interface UpdateReviewDTO {
+  rating: number;
+  comment?: string | null;
+}
+
+// Inferred response shape for PatientReviews list/detail endpoints.
+export interface PatientReviewViewDto {
+  id?: number | null;
+  reviewId?: number | null;
+  doctorId?: number | null;
+  patientId?: number | null;
+  appointmentId?: number | null;
+  rating?: number | null;
+  comment?: string | null;
+  doctorName?: string | null;
+  patientName?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  date?: string | null;
+}
+
 export interface UpdateMedicalRecordRequest {
   id: string;
   appointmentId: number;
@@ -155,6 +183,9 @@ export const SwaggerTypes = {
   PrescriptionDetailsDTO: undefined as unknown as PrescriptionDetailsDTO,
   CreateMedicalRecordDto: undefined as unknown as CreateMedicalRecordDto,
   MedicalRecordViewDto: undefined as unknown as MedicalRecordViewDto,
+  AddReviewDTO: undefined as unknown as AddReviewDTO,
+  UpdateReviewDTO: undefined as unknown as UpdateReviewDTO,
+  PatientReviewViewDto: undefined as unknown as PatientReviewViewDto,
   UpdateMedicalRecordRequest:
     undefined as unknown as UpdateMedicalRecordRequest,
 };

@@ -1,5 +1,5 @@
 // Core application types - Ready for API integration
-
+//index.ts file
 export interface User {
   id: string;
   email: string;
@@ -16,6 +16,7 @@ export interface Patient extends User {
   role: "patient";
   dateOfBirth: string;
   gender: "male" | "female" | "other";
+
   address: string;
   bloodType?: string;
   allergies?: string[];
@@ -204,6 +205,7 @@ export interface Review {
   patient?: Patient;
   doctorId: string;
   doctor?: Doctor;
+  appointmentId?: string;
   rating: number;
   comment: string;
   createdAt: string;

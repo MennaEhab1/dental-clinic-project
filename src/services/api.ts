@@ -49,6 +49,8 @@ import type {
   RevokeTokenDTO,
   UpdatePatientProfileDto,
   CreateMedicalRecordDto,
+  AddReviewDTO,
+  UpdateReviewDTO,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -1665,9 +1667,14 @@ function extractApiArray(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
   if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj["$values"])) return obj["$values"];
     for (const key of ["data", "value", "items", "records", "result"]) {
       const nested = obj[key];
       if (Array.isArray(nested)) return nested;
+      if (nested && typeof nested === "object") {
+        const inner = extractApiArray(nested);
+        if (inner.length > 0) return inner;
+      }
     }
   }
   return [];
@@ -3333,77 +3340,202 @@ export const dashboardService = {
 };
 
 // Review Services
+function parseReviewNumericId(value: string): number | null {
+  return parseEntityNumericId(value);
+}
+
+function parseDoctorNumericId(value: string): number | null {
+  return parseEntityNumericId(value);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapBackendToReview(item: any): Review {
+  const reviewId = item.reviewId ?? item.id ?? item.reviewID;
+  const doctorId = item.doctorId ?? item.doctorID ?? item.doctor?.id;
+  const patientId = item.patientId ?? item.patientID ?? item.patient?.id ?? "";
+  const rawDoctorName = String(
+    item.doctorName ?? item.doctor_name ?? item.doctorFullName ?? "",
+  ).trim();
+  const rawPatientName = String(
+    item.patientName ?? item.patient_name ?? item.patientFullName ?? "",
+  ).trim();
+  const { firstName: doctorFirstName, lastName: doctorLastName } =
+    splitDoctorName(rawDoctorName || null);
+  const { firstName: patientFirstName, lastName: patientLastName } =
+    splitName(rawPatientName || null);
+  const doctorObj = item.doctor;
+  const patientObj = item.patient;
+  const createdAt = String(
+    item.createdAt ?? item.createdDate ?? item.date ?? new Date().toISOString(),
+  );
+  const updatedAt = String(item.updatedAt ?? item.updatedDate ?? createdAt);
+
+  const mappedDoctor =
+    doctorObj && typeof doctorObj === "object"
+      ? {
+          id: String(doctorObj.id || doctorObj.doctorId || doctorId || ""),
+          email: String(doctorObj.email || ""),
+          firstName: String(doctorObj.firstName || doctorObj.first_name || ""),
+          lastName: String(doctorObj.lastName || doctorObj.last_name || ""),
+          phone: String(doctorObj.phone || doctorObj.phoneNumber || ""),
+          avatar: String(doctorObj.avatar || doctorObj.profileImage || ""),
+          role: "doctor" as const,
+          specialty: normalizeSpecialty(doctorObj.specialty),
+          qualifications: [],
+          experience: toSafeNumber(doctorObj.experience),
+          bio: String(doctorObj.bio || ""),
+          consultationFee: toSafeNumber(doctorObj.consultationFee),
+          rating: toSafeNumber(doctorObj.rating),
+          reviewCount: toSafeNumber(doctorObj.reviewCount),
+          availableSlots: [],
+          workingDays: [],
+          createdAt,
+          updatedAt,
+        }
+      : rawDoctorName || doctorId
+        ? {
+            id: String(doctorId ?? ""),
+            email: "",
+            firstName: doctorFirstName,
+            lastName: doctorLastName,
+            phone: "",
+            avatar: "",
+            role: "doctor" as const,
+            specialty: "general" as const,
+            qualifications: [],
+            experience: 0,
+            bio: "",
+            consultationFee: 0,
+            rating: 0,
+            reviewCount: 0,
+            availableSlots: [],
+            workingDays: [],
+            createdAt,
+            updatedAt,
+          }
+        : undefined;
+
+  const mappedPatient =
+    patientObj && typeof patientObj === "object"
+      ? {
+          id: String(patientObj.id || patientObj.patientId || patientId || ""),
+          email: String(patientObj.email || ""),
+          firstName: String(
+            patientObj.firstName || patientObj.first_name || "",
+          ),
+          lastName: String(patientObj.lastName || patientObj.last_name || ""),
+          phone: String(patientObj.phone || patientObj.phoneNumber || ""),
+          avatar: String(patientObj.avatar || patientObj.profileImage || ""),
+          role: "patient" as const,
+          dateOfBirth: String(patientObj.dateOfBirth || ""),
+          gender: "other" as const,
+          address: String(patientObj.address || ""),
+          createdAt,
+          updatedAt,
+        }
+      : rawPatientName
+        ? {
+            id: String(patientId || ""),
+            email: "",
+            firstName: patientFirstName,
+            lastName: patientLastName,
+            phone: "",
+            avatar: "",
+            role: "patient" as const,
+            dateOfBirth: "",
+            gender: "other" as const,
+            address: "",
+            createdAt,
+            updatedAt,
+          }
+        : undefined;
+
+  return {
+    id: reviewId != null && String(reviewId).trim() !== "" ? String(reviewId) : "",
+    patientId: patientId != null ? String(patientId) : "",
+    patient: mappedPatient,
+    doctorId: doctorId != null ? String(doctorId) : "",
+    doctor: mappedDoctor,
+    appointmentId:
+      item.appointmentId != null
+        ? String(item.appointmentId)
+        : item.appointmentID != null
+          ? String(item.appointmentID)
+          : undefined,
+    rating: Math.min(5, Math.max(0, toSafeNumber(item.rating))),
+    comment: String(item.comment ?? item.reviewComment ?? item.text ?? ""),
+    createdAt,
+    updatedAt,
+    helpful: toSafeNumber(item.helpful ?? item.helpfulCount),
+  };
+}
+
+function mapReviewListResponse(raw: unknown): Review[] {
+  return extractApiArray(raw).map((item) => mapBackendToReview(item));
+}
+
+function enrichReviewsWithDoctors(
+  reviews: Review[],
+  doctors: Doctor[],
+): Review[] {
+  const doctorsById = new Map<string, Doctor>();
+  doctors.forEach((doctor) => {
+    const key = normalizeLookupKey(doctor.id);
+    if (key) doctorsById.set(key, doctor);
+  });
+
+  return reviews.map((review) => {
+    if (review.doctor?.firstName || review.doctor?.lastName) return review;
+    const matched = doctorsById.get(normalizeLookupKey(review.doctorId));
+    return matched ? { ...review, doctor: matched } : review;
+  });
+}
+
+export function isBackendReviewId(id: string): boolean {
+  return parseReviewNumericId(id) !== null;
+}
+
 export const reviewService = {
   /**
-   * Get all reviews written by current patient
    * GET /api/PatientReviews/GetMyReviews
    */
   async getMyReviews(): Promise<ApiResponse<Review[]>> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiCall<any>("/api/PatientReviews/GetMyReviews", {
+      const res = await apiCall<unknown>("/api/PatientReviews/GetMyReviews", {
         method: "GET",
       });
-      const raw: unknown = res.data;
-
-      console.debug("[reviewService.getMyReviews] Raw response:", raw);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      function extractArray(val: unknown): Review[] | null {
-        if (Array.isArray(val)) return val as Review[];
-        if (val && typeof val === "object") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const obj = val as Record<string, any>;
-          // ASP.NET JSON.NET: { "$id": "1", "$values": [...] }
-          if (Array.isArray(obj["$values"])) return obj["$values"] as Review[];
-          // Wrapped envelope: { data: [...] }
-          if (Array.isArray(obj["data"])) return obj["data"] as Review[];
-          // OkObjectResult: { value: [...] }
-          if (Array.isArray(obj["value"])) return obj["value"] as Review[];
-          // Nested $values inside value: { value: { "$values": [...] } }
-          if (obj["value"] && typeof obj["value"] === "object") {
-            const nested = extractArray(obj["value"]);
-            if (nested) return nested;
-          }
-          // Nested $values inside data: { data: { "$values": [...] } }
-          if (obj["data"] && typeof obj["data"] === "object") {
-            const nested = extractArray(obj["data"]);
-            if (nested) return nested;
-          }
-        }
-        return null;
-      }
-
-      const reviews = extractArray(raw) ?? [];
-      console.debug(
-        "[reviewService.getMyReviews] Parsed reviews:",
-        reviews.length,
-      );
+      const reviews = mapReviewListResponse(res.data);
       return { data: reviews, success: true };
     } catch (error) {
       console.error("[reviewService.getMyReviews] Error:", error);
-      return { data: [], success: false };
+      return {
+        data: [],
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to fetch reviews",
+      };
     }
   },
 
   /**
-   * Get reviews for a specific doctor
    * GET /api/PatientReviews/GetMyReviewsForDoctor/{doctorId}
    */
   async getReviewsForDoctor(doctorId: string): Promise<ApiResponse<Review[]>> {
+    const numericDoctorId = parseDoctorNumericId(doctorId);
+    if (!numericDoctorId) {
+      return {
+        data: [],
+        success: false,
+        message: `Invalid doctor ID: "${doctorId}"`,
+      };
+    }
+
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const res = await apiCall<any>(
-        `/api/PatientReviews/GetMyReviewsForDoctor/${doctorId}`,
+      const res = await apiCall<unknown>(
+        `/api/PatientReviews/GetMyReviewsForDoctor/${numericDoctorId}`,
         { method: "GET" },
       );
-      const reviews: Review[] = Array.isArray(res.data)
-        ? (res.data as Review[])
-        : // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          Array.isArray((res.data as any)?.data)
-          ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ((res.data as any).data as Review[])
-          : [];
+      const reviews = mapReviewListResponse(res.data);
       return { data: reviews, success: true };
     } catch (error) {
       console.error(
@@ -3411,52 +3543,61 @@ export const reviewService = {
         doctorId,
         error,
       );
-      return { data: [], success: false };
+      return {
+        data: [],
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to fetch reviews",
+      };
     }
   },
 
   /**
-   * Add a new review for a doctor
    * POST /api/PatientReviews/AddReview
    */
   async addReview(data: {
     doctorId: string;
-    appointmentId?: string;
+    appointmentId: string;
     rating: number;
     comment: string;
   }): Promise<ApiResponse<Review>> {
     try {
-      let doctorId = Number(data.doctorId);
-      if (Number.isNaN(doctorId)) {
-        const numericMatch = data.doctorId.match(/\d+/);
-        doctorId = numericMatch ? Number(numericMatch[0]) : NaN;
+      const numericDoctorId = parseDoctorNumericId(data.doctorId);
+      const numericAppointmentId = parseEntityNumericId(data.appointmentId);
+
+      if (!numericDoctorId) {
+        throw new Error(`Invalid doctor ID: "${data.doctorId}"`);
+      }
+      if (!numericAppointmentId) {
+        throw new Error(`Invalid appointment ID: "${data.appointmentId}"`);
       }
 
-      if (Number.isNaN(doctorId)) {
-        throw new Error("Invalid doctor ID for review");
-      }
+      const payload: AddReviewDTO = {
+        doctorId: numericDoctorId,
+        appointmentId: numericAppointmentId,
+        rating: data.rating,
+        comment: data.comment?.trim() || null,
+      };
 
-      let appointmentId: number | undefined;
-      if (data.appointmentId) {
-        const parsedAppointmentId = Number(data.appointmentId);
-        appointmentId = Number.isNaN(parsedAppointmentId)
-          ? undefined
-          : parsedAppointmentId;
-      }
-
-      const res = await apiCall<Review>("/api/PatientReviews/AddReview", {
+      await apiCall<unknown>("/api/PatientReviews/AddReview", {
         method: "POST",
-        body: JSON.stringify({
-          doctorId,
-          appointmentId,
-          rating: data.rating,
-          comment: data.comment,
-        }),
+        body: JSON.stringify(payload),
       });
-      // Backend returns Ok("Review added successfully") — a plain string, not a Review object.
-      // Treat any 2xx response as success; data will be the string message.
+
+      const refreshed = await reviewService.getMyReviews();
+      const matched = (refreshed.data || []).find((review) => {
+        const reviewDoctorId = parseDoctorNumericId(review.doctorId);
+        const reviewAppointmentId = review.appointmentId
+          ? parseEntityNumericId(review.appointmentId)
+          : null;
+        return (
+          reviewDoctorId === numericDoctorId &&
+          (reviewAppointmentId === numericAppointmentId || !reviewAppointmentId)
+        );
+      });
+
       return {
-        data: (typeof res.data === "object" ? res.data : {}) as Review,
+        data: matched || ({} as Review),
         success: true,
         message: "Review added successfully",
       };
@@ -3472,23 +3613,52 @@ export const reviewService = {
   },
 
   /**
-   * Update an existing review
    * PUT /api/PatientReviews/UpdateReview/{reviewId}
    */
   async updateReview(
     reviewId: string,
     data: { rating: number; comment: string },
   ): Promise<ApiResponse<Review>> {
+    const numericReviewId = parseReviewNumericId(reviewId);
+    if (!numericReviewId) {
+      return {
+        data: {} as Review,
+        success: false,
+        message: `Invalid review ID: "${reviewId}"`,
+      };
+    }
+
     try {
-      const res = await apiCall<Review>(
-        `/api/PatientReviews/UpdateReview/${reviewId}`,
+      const payload: UpdateReviewDTO = {
+        rating: data.rating,
+        comment: data.comment?.trim() || null,
+      };
+
+      await apiCall<unknown>(
+        `/api/PatientReviews/UpdateReview/${numericReviewId}`,
         {
           method: "PUT",
-          body: JSON.stringify(data),
+          body: JSON.stringify(payload),
         },
       );
+
+      const refreshed = await reviewService.getMyReviews();
+      const matched = (refreshed.data || []).find(
+        (review) => String(review.id) === String(numericReviewId),
+      );
+
       return {
-        data: res.data,
+        data:
+          matched ||
+          ({
+            id: String(numericReviewId),
+            rating: data.rating,
+            comment: data.comment,
+            patientId: "",
+            doctorId: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as Review),
         success: true,
         message: "Review updated successfully",
       };
@@ -3498,17 +3668,30 @@ export const reviewService = {
         reviewId,
         error,
       );
-      return { data: {} as Review, success: false };
+      return {
+        data: {} as Review,
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to update review",
+      };
     }
   },
 
   /**
-   * Delete a review
    * DELETE /api/PatientReviews/DeleteReview/{reviewId}
    */
   async deleteReview(reviewId: string): Promise<ApiResponse<void>> {
+    const numericReviewId = parseReviewNumericId(reviewId);
+    if (!numericReviewId) {
+      return {
+        data: undefined,
+        success: false,
+        message: `Invalid review ID: "${reviewId}"`,
+      };
+    }
+
     try {
-      await apiCall(`/api/PatientReviews/DeleteReview/${reviewId}`, {
+      await apiCall(`/api/PatientReviews/DeleteReview/${numericReviewId}`, {
         method: "DELETE",
       });
       return {
@@ -3522,9 +3705,16 @@ export const reviewService = {
         reviewId,
         error,
       );
-      return { data: undefined, success: false };
+      return {
+        data: undefined,
+        success: false,
+        message:
+          error instanceof Error ? error.message : "Failed to delete review",
+      };
     }
   },
+
+  enrichReviewsWithDoctors,
 };
 // ============================================================
 // ADMIN SERVICES

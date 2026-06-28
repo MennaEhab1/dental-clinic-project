@@ -118,20 +118,19 @@ export default function PatientReviews() {
         // Fetch reviews and enrich with doctor info using the already-loaded list
         const reviewsResult = await reviewService.getMyReviews();
         if (reviewsResult.success && Array.isArray(reviewsResult.data)) {
-          const enriched = reviewsResult.data.map((review) => {
-            if (!review.doctor && review.doctorId) {
-              const matched = doctorsList.find(
-                (d) => String(d.id) === String(review.doctorId),
-              );
-              if (matched) return { ...review, doctor: matched };
-            }
-            return review;
-          });
-          setReviews(enriched);
+          setReviews(
+            reviewService.enrichReviewsWithDoctors(
+              reviewsResult.data,
+              doctorsList,
+            ),
+          );
         } else {
           console.warn(
             "[PatientReviews] Failed to fetch reviews or no data returned",
           );
+          if (reviewsResult.message) {
+            showToast("error", reviewsResult.message);
+          }
           setReviews([]);
         }
 
@@ -209,6 +208,17 @@ export default function PatientReviews() {
       !reviews.some((review) => String(review.doctorId) === String(doctor.id)),
   );
 
+  const refreshReviews = async () => {
+    const reviewsResult = await reviewService.getMyReviews();
+    if (reviewsResult.success && Array.isArray(reviewsResult.data)) {
+      setReviews(
+        reviewService.enrichReviewsWithDoctors(reviewsResult.data, doctors),
+      );
+      return true;
+    }
+    return false;
+  };
+
   const handleSubmitReview = async () => {
     if (
       !formData.doctorId ||
@@ -228,18 +238,29 @@ export default function PatientReviews() {
           comment: formData.comment,
         });
         if (result.success) {
-          setReviews((prev) =>
-            prev.map((r) =>
-              r.id === editingReview.id
-                ? { ...r, rating: formData.rating, comment: formData.comment }
-                : r,
-            ),
-          );
+          const refreshed = await refreshReviews();
+          if (!refreshed) {
+            setReviews((prev) =>
+              prev.map((r) =>
+                r.id === editingReview.id
+                  ? {
+                      ...r,
+                      rating: formData.rating,
+                      comment: formData.comment,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : r,
+              ),
+            );
+          }
           resetForm();
           setShowForm(false);
           showToast("success", "Review updated successfully!");
         } else {
-          showToast("error", "Failed to update review. Please try again.");
+          showToast(
+            "error",
+            result.message || "Failed to update review. Please try again.",
+          );
         }
       } else {
         // Add new review
@@ -261,93 +282,8 @@ export default function PatientReviews() {
           comment: formData.comment,
         });
         if (result.success) {
-          // Build the real ID from the backend response — never fall back to a local-* ID
-          // because that breaks UpdateReview later.
-          const realId = result.data?.id ? String(result.data.id) : null;
-
-          // Helper: build an enriched optimistic review using the real backend ID
-          const buildOptimistic = (id: string): ReviewWithAppointment => ({
-            id,
-            doctorId: formData.doctorId,
-            doctor: (() => {
-              const found =
-                appointments.find(
-                  (a) =>
-                    String(a.doctorId || a.doctor?.id) === formData.doctorId,
-                )?.doctor ||
-                doctors.find((d) => String(d.id) === formData.doctorId);
-              return found
-                ? {
-                    id: String(found.id),
-                    email: found.email || "",
-                    firstName: found.firstName || "",
-                    lastName: found.lastName || "",
-                    phone: found.phone || "",
-                    avatar: found.avatar,
-                    role: "doctor" as const,
-                    specialty: found.specialty || "general",
-                    qualifications: [],
-                    experience: 0,
-                    bio: "",
-                    consultationFee: 0,
-                    rating: 0,
-                    reviewCount: 0,
-                    availableSlots: [],
-                    workingDays: [],
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                  }
-                : undefined;
-            })(),
-            rating: formData.rating,
-            comment: formData.comment,
-            patientId: "",
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-
-          // Try to refresh from backend first
-          const reviewsResult = await reviewService.getMyReviews();
-          if (
-            reviewsResult.success &&
-            Array.isArray(reviewsResult.data) &&
-            reviewsResult.data.length > 0
-          ) {
-            const enriched = reviewsResult.data.map((review) => {
-              if (!review.doctor && review.doctorId) {
-                const matched = doctors.find(
-                  (d) => String(d.id) === String(review.doctorId),
-                );
-                if (matched) return { ...review, doctor: matched };
-              }
-              return review;
-            });
-            setReviews(enriched);
-          } else if (realId) {
-            // Backend returned empty (possible caching delay) but we have a real ID —
-            // show optimistic review immediately, then retry once after a short delay.
-            setReviews((prev) => [buildOptimistic(realId), ...prev]);
-            setTimeout(async () => {
-              const retryResult = await reviewService.getMyReviews();
-              if (
-                retryResult.success &&
-                Array.isArray(retryResult.data) &&
-                retryResult.data.length > 0
-              ) {
-                const enriched = retryResult.data.map((review) => {
-                  if (!review.doctor && review.doctorId) {
-                    const matched = doctors.find(
-                      (d) => String(d.id) === String(review.doctorId),
-                    );
-                    if (matched) return { ...review, doctor: matched };
-                  }
-                  return review;
-                });
-                setReviews(enriched);
-              }
-            }, 1500);
-          } else {
-            // No real ID from backend at all — show warning instead of unusable local review
+          const refreshed = await refreshReviews();
+          if (!refreshed) {
             showToast(
               "warning",
               "Review submitted but couldn't load updated list. Please refresh the page.",
@@ -357,7 +293,10 @@ export default function PatientReviews() {
           setShowForm(false);
           showToast("success", "Review submitted successfully!");
         } else {
-          showToast("error", "Failed to submit review. Please try again.");
+          showToast(
+            "error",
+            result.message || "Failed to submit review. Please try again.",
+          );
         }
       }
     } catch (error) {
@@ -382,7 +321,10 @@ export default function PatientReviews() {
         setReviews((prev) => prev.filter((r) => r.id !== reviewId));
         showToast("success", "Review deleted successfully!");
       } else {
-        showToast("error", "Failed to delete review. Please try again.");
+        showToast(
+          "error",
+          result.message || "Failed to delete review. Please try again.",
+        );
       }
     } catch (error) {
       console.error("[PatientReviews] Error deleting review:", error);
@@ -515,7 +457,7 @@ export default function PatientReviews() {
             <div className="grid gap-4">
               {reviews.map((review, index) => (
                 <motion.div
-                  key={review.id}
+                  key={review.id || `review-${index}`}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}

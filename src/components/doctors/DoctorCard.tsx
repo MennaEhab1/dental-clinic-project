@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Star } from "lucide-react";
+import { Star, MessageSquare } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Doctor } from "@/types";
 import { Link } from "react-router-dom";
+import { DoctorReviewsDialog } from "@/components/doctors/DoctorReviewsDialog";
 
 interface DoctorCardProps {
   doctor: Doctor;
@@ -40,6 +42,7 @@ const specialtyLabels: Record<string, string> = {
 };
 
 export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
+  const [reviewsOpen, setReviewsOpen] = useState(false);
   const normalizedFirstName = (doctor.firstName || "")
     .replace(/^\s*dr\.?\s+/i, "")
     .trim();
@@ -54,33 +57,49 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
 
   if (variant === "compact") {
     return (
-      <motion.div
-        whileHover={{ y: -2 }}
-        className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border hover:shadow-soft transition-shadow"
-      >
-        <img
-          src={doctor.avatar}
-          alt={`Dr. ${fullName}`}
-          className="w-14 h-14 rounded-xl object-cover"
+      <>
+        <motion.div
+          whileHover={{ y: -2 }}
+          className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border hover:shadow-soft transition-shadow"
+        >
+          <img
+            src={doctor.avatar}
+            alt={`Dr. ${fullName}`}
+            className="w-14 h-14 rounded-xl object-cover"
+          />
+          <div className="flex-1 min-w-0">
+            <h4 className="font-medium text-foreground truncate">
+              Dr. {fullName}
+            </h4>
+            <p className="text-sm text-muted-foreground">
+              {specialtyLabels[doctor.specialty]}
+            </p>
+          </div>
+          <div className="flex items-center gap-1">
+            <Star className="w-4 h-4 text-warning fill-warning" />
+            <span className="text-sm font-medium">{doctor.rating}</span>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setReviewsOpen(true)}
+          >
+            Reviews
+          </Button>
+        </motion.div>
+        <DoctorReviewsDialog
+          doctor={doctor}
+          open={reviewsOpen}
+          onOpenChange={setReviewsOpen}
         />
-        <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-foreground truncate">
-            Dr. {fullName}
-          </h4>
-          <p className="text-sm text-muted-foreground">
-            {specialtyLabels[doctor.specialty]}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <Star className="w-4 h-4 text-warning fill-warning" />
-          <span className="text-sm font-medium">{doctor.rating}</span>
-        </div>
-      </motion.div>
+      </>
     );
   }
 
   return (
-    <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
+    <>
+      <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
       <Card className="overflow-hidden shadow-card hover:shadow-elevated transition-shadow">
         <div className="relative">
           <img
@@ -131,12 +150,28 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
                 ${doctor.consultationFee}
               </p>
             </div>
-            <Link to={`/booking?doctor=${doctor.id}`}>
-              <Button className="gradient-bg border-0">Book Now</Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setReviewsOpen(true)}
+              >
+                <MessageSquare className="w-4 h-4 mr-2" />
+                Reviews
+              </Button>
+              <Link to={`/booking?doctor=${doctor.id}`}>
+                <Button className="gradient-bg border-0">Book Now</Button>
+              </Link>
+            </div>
           </div>
         </CardContent>
       </Card>
-    </motion.div>
+      </motion.div>
+      <DoctorReviewsDialog
+        doctor={doctor}
+        open={reviewsOpen}
+        onOpenChange={setReviewsOpen}
+      />
+    </>
   );
 }

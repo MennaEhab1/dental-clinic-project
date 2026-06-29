@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+//PatientProfile.tsx
+import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
@@ -42,11 +43,11 @@ function buildFallbackPatient(
     dateOfBirth: user?.dateOfBirth || "",
     gender: user?.gender || "other",
     address: user?.address || "",
-    bloodType: user?.bloodType,
-    allergies: user?.allergies,
+    //bloodType: user?.bloodType,
+    //allergies: user?.allergies,
     isActive: true,
-    emergencyContact: user?.emergencyContact,
-    insuranceInfo: user?.insuranceInfo,
+    //emergencyContact: user?.emergencyContact,
+    //insuranceInfo: user?.insuranceInfo,
     createdAt: user?.createdAt || new Date().toISOString(),
     updatedAt: user?.updatedAt || new Date().toISOString(),
   };
@@ -79,48 +80,20 @@ export default function PatientProfile() {
     promotions: false,
   });
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const fetchPatient = async () => {
       const fallback = buildFallbackPatient(user);
 
-      const loadCachedPatient = (): Patient | null => {
-        try {
-          const raw = localStorage.getItem("patient_profile_cache");
-          if (!raw) return null;
-          return JSON.parse(raw) as Patient;
-        } catch (error) {
-          console.warn(
-            "[PatientProfile] Failed to parse cached profile",
-            error,
-          );
-          return null;
-        }
-      };
-
-      const cachePatient = (profile: Patient) => {
-        try {
-          localStorage.setItem(
-            "patient_profile_cache",
-            JSON.stringify(profile),
-          );
-        } catch (error) {
-          console.warn("[PatientProfile] Failed to cache profile", error);
-        }
-      };
-
       try {
         const profileResponse = await patientService.getProfile(fallback);
-        const cached = loadCachedPatient();
-        const nextPatient = profileResponse.data || cached || fallback;
+        const nextPatient = profileResponse.data || fallback;
 
         setPatient(nextPatient);
-        cachePatient(nextPatient);
       } catch (error) {
         console.error("Failed to fetch patient profile:", error);
-        const cached = loadCachedPatient();
-        const nextPatient = cached || fallback;
-        setPatient(nextPatient);
-        cachePatient(nextPatient);
+        setPatient(fallback);
       } finally {
         setIsLoading(false);
       }
@@ -155,14 +128,7 @@ export default function PatientProfile() {
       );
 
       setPatient(updated.data);
-      try {
-        localStorage.setItem(
-          "patient_profile_cache",
-          JSON.stringify(updated.data),
-        );
-      } catch (error) {
-        console.warn("[PatientProfile] Failed to cache updated profile", error);
-      }
+
       toast({
         title: "Profile Updated",
         description: "Your profile has been saved successfully.",
@@ -192,6 +158,79 @@ export default function PatientProfile() {
       description: "Your password has been updated.",
     });
     setPasswords({ current: "", new: "", confirm: "" });
+  };
+
+  // const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  //   const file = e.target.files?.[0];
+  //   if (!file) return;
+
+  //   // Preview فوري قبل الـ upload
+  //   const localPreview = URL.createObjectURL(file);
+  //   setPatient((prev) => ({ ...prev, avatar: localPreview }));
+
+  //   try {
+  //     const result = await patientService.uploadProfileImage(file);
+  //     if (result.success) {
+  //       setPatient(result.data);
+  //       localStorage.setItem(
+  //         "patient_profile_cache",
+  //         JSON.stringify(result.data),
+  //       );
+  //       toast({
+  //         title: "Photo Updated",
+  //         description: "Profile photo saved successfully.",
+  //       });
+  //     } else {
+  //       throw new Error(result.message || "Upload failed");
+  //     }
+  //   } catch (error) {
+  //     console.error("Avatar upload failed:", error);
+  //     // revert الـ preview لو فشل
+  //     setPatient((prev) => ({ ...prev, avatar: patient.avatar }));
+  //     toast({
+  //       title: "Upload Failed",
+  //       description: "Could not update profile photo.",
+  //       variant: "destructive",
+  //     });
+  //   } finally {
+  //     // reset الـ input عشان تقدري ترفعي نفس الصورة تاني لو حبيتي
+  //     if (fileInputRef.current) fileInputRef.current.value = "";
+  //     // حرري الـ object URL من الـ memory
+  //     URL.revokeObjectURL(localPreview);
+  //   }
+  // };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const previousAvatar = patient.avatar;
+    const localPreview = URL.createObjectURL(file);
+
+    setPatient((prev) => ({ ...prev, avatar: localPreview }));
+
+    try {
+      const result = await patientService.uploadProfileImage(file, patient);
+
+      if (result.success) {
+        setPatient(result.data);
+        toast({
+          title: "Photo Updated",
+          description: "Profile photo saved successfully.",
+        });
+      }
+    } catch (error) {
+      console.error("Avatar upload failed:", error);
+      setPatient((prev) => ({ ...prev, avatar: previousAvatar }));
+      toast({
+        title: "Upload Failed",
+        description: "Could not update profile photo.",
+        variant: "destructive",
+      });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      URL.revokeObjectURL(localPreview);
+    }
   };
 
   if (isLoading) {
@@ -234,7 +273,7 @@ export default function PatientProfile() {
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Avatar */}
-                <div className="flex items-center gap-4">
+                {/* <div className="flex items-center gap-4">
                   <div className="relative">
                     <Avatar className="h-20 w-20">
                       <AvatarImage src={patient.avatar} />
@@ -255,17 +294,51 @@ export default function PatientProfile() {
                     <p className="font-semibold text-foreground">
                       {patient.firstName} {patient.lastName}
                     </p>
-                    <p className="text-sm text-muted-foreground">
+                    {/* <p className="text-sm text-muted-foreground">
                       Patient ID: {patient.id}
-                    </p>
-                    <Badge className="mt-1 bg-success/10 text-success">
+                    </p> */}
+                {/* <Badge className="mt-1 bg-success/10 text-success">
                       Active
-                    </Badge>
+                    </Badge> */}
+                {/* </div>
+                </div> */}{" "}
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <Avatar className="h-20 w-20">
+                      <AvatarImage src={patient.avatar} />
+                      <AvatarFallback className="text-xl">
+                        {patient.firstName[0]}
+                        {patient.lastName[0]}
+                      </AvatarFallback>
+                    </Avatar>
+
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                    />
+
+                    {/* Camera button يفتح الـ file picker */}
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full"
+                      onClick={() => fileInputRef.current?.click()}
+                      type="button"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground">
+                      {patient.firstName} {patient.lastName}
+                    </p>
                   </div>
                 </div>
-
                 <Separator />
-
                 <div className="grid md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -345,7 +418,6 @@ export default function PatientProfile() {
                     />
                   </div>
                 </div>
-
                 <Button onClick={handleSave} className="gradient-bg border-0">
                   <Save className="w-4 h-4 mr-2" /> Save Changes
                 </Button>

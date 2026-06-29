@@ -1,14 +1,4 @@
-/**
- * API Service Layer
- *
- * This file contains all API calls for the dental center application.
- * Now fully integrated with real backend API at https://smart-teeth-care.runasp.net
- *
- * Authentication:
- * - Tokens are stored in memory (cleared on logout/page refresh for security)
- * - Authorization header is automatically attached to protected endpoints
- * - Backend response includes UserDTO with token
- */
+
 
 import { ApiResponse, PaginatedResponse } from "@/types";
 // TODO :  امسح جزء ال mockdata

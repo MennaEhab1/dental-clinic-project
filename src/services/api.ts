@@ -1,3 +1,5 @@
+
+
 import { ApiResponse, PaginatedResponse } from "@/types";
 // TODO :  امسح جزء ال mockdata
 import {
@@ -205,18 +207,6 @@ function mapBackendPatientProfileToPatient(
   const { firstName: splitFirstName, lastName: splitLastName } = splitName(
     String(item.fullName || item.name || item.userName || "").trim(),
   );
-  const avatar = resolveBackendAssetUrl(
-    String(
-      item.avatar ||
-        item.profileImage ||
-        item.profileImageUrl ||
-        item.profilePicture ||
-        item.profilePictureUrl ||
-        item.imageUrl ||
-        item.photoUrl ||
-        "",
-    ),
-  );
 
   const rawGender = String(item.gender || fallback?.gender || "other")
     .toLowerCase()
@@ -239,8 +229,7 @@ function mapBackendPatientProfileToPatient(
       item.lastName || item.last_name || fallback?.lastName || splitLastName,
     ),
     phone: String(item.phone || item.phoneNumber || fallback?.phone || ""),
-    // avatar: String(item.avatar || item.profileImage || fallback?.avatar || ""),
-    avatar: avatar || fallback?.avatar || "",
+    avatar: String(item.avatar || item.profileImage || fallback?.avatar || ""),
     role: "patient",
     dateOfBirth: normalizeDateForInput(
       String(item.dateOfBirth || fallback?.dateOfBirth || ""),
@@ -1806,10 +1795,7 @@ function mapBackendToMedicalRecord(item: any): MedicalRecord {
 
   const recordId = item.id ?? item.recordId ?? item.medicalRecordId;
   return {
-    id:
-      recordId != null && String(recordId).trim() !== ""
-        ? String(recordId)
-        : "",
+    id: recordId != null && String(recordId).trim() !== "" ? String(recordId) : "",
     appointmentId:
       item.appointmentId != null
         ? String(item.appointmentId)
@@ -2270,9 +2256,10 @@ export const doctorService = {
 // Patient Services
 export const patientService = {
   async getProfile(fallback?: Partial<Patient>): Promise<ApiResponse<Patient>> {
+    const cached = readCachedPatientProfile();
     const fallbackPatient = mapBackendPatientProfileToPatient(
       fallback || {},
-      fallback,
+      cached || fallback,
     );
 
     try {
@@ -2281,11 +2268,22 @@ export const patientService = {
       });
       const mapped = mapBackendPatientProfileToPatient(
         res.data,
-        fallbackPatient,
+        cached || fallbackPatient,
       );
       writeCachedPatientProfile(mapped);
       return { data: mapped, success: true };
     } catch (error) {
+      if (cached) {
+        return {
+          data: cached,
+          success: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to fetch patient profile",
+        };
+      }
+
       return {
         data: fallbackPatient,
         success: false,
@@ -2321,47 +2319,17 @@ export const patientService = {
     const mergedFallback = mapBackendPatientProfileToPatient(
       {
         ...(fallback || {}),
-        ...payload,
+        firstName: payload.firstName ?? fallback?.firstName,
+        lastName: payload.lastName ?? fallback?.lastName,
+        phone: payload.phone ?? fallback?.phone,
+        address: payload.address ?? fallback?.address,
+        gender: payload.gender ?? fallback?.gender,
+        dateOfBirth: payload.dateOfBirth ?? fallback?.dateOfBirth,
       },
       refreshed.data,
     );
-
     writeCachedPatientProfile(mergedFallback);
     return { data: mergedFallback, success: true };
-  },
-
-  // في patientService، بعد updateProfile
-
-  async uploadProfileImage(
-    file: File,
-    fallback?: Partial<Patient>,
-  ): Promise<ApiResponse<Patient>> {
-    const token = getAuthToken();
-    const formData = new FormData();
-
-    formData.append("ProfileImage", file);
-    formData.append("file", file);
-
-    const response = await fetch(
-      `${BASE_URL}/api/patient/profile/upload-image`,
-      {
-        method: "POST",
-        headers: {
-          ...(token
-            ? { Authorization: `Bearer ${token.replace(/^Bearer\s+/i, "")}` }
-            : {}),
-        },
-        body: formData,
-        mode: "cors",
-      },
-    );
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Upload failed (${response.status}): ${text}`);
-    }
-
-    return this.getProfile(fallback);
   },
 
   // Mock endpoints - no backend API available
@@ -2409,7 +2377,17 @@ export const patientService = {
       updatedAt: new Date().toISOString(),
     } as Patient;
 
-    writeCachedPatientProfile(mergedPatient);
+    try {
+      localStorage.setItem(
+        "patient_profile_cache",
+        JSON.stringify(mergedPatient),
+      );
+    } catch (e) {
+      console.warn(
+        "[patientService.update] Failed to cache patient profile",
+        e,
+      );
+    }
 
     return { data: mergedPatient, success: true };
   },
@@ -2431,23 +2409,11 @@ export const patientService = {
   },
 };
 
-function getPatientProfileCacheKey(identity?: Partial<Patient>): string {
-  const id =
-    identity?.id ||
-    identity?.email ||
-    authService.getCurrentUserIdFromToken() ||
-    "current";
-
-  return `patient_profile_cache:${id}`;
-}
-
-export function readCachedPatientProfile(
-  identity?: Partial<Patient>,
-): Patient | null {
+function readCachedPatientProfile(): Patient | null {
   try {
-    const scopedRaw = localStorage.getItem(getPatientProfileCacheKey(identity));
-    if (scopedRaw) return JSON.parse(scopedRaw) as Patient;
-    return null;
+    const raw = localStorage.getItem("patient_profile_cache");
+    if (!raw) return null;
+    return JSON.parse(raw) as Patient;
   } catch {
     return null;
   }
@@ -2455,38 +2421,7 @@ export function readCachedPatientProfile(
 
 function writeCachedPatientProfile(profile: Patient): void {
   try {
-    localStorage.setItem(
-      getPatientProfileCacheKey(profile),
-      JSON.stringify(profile),
-    );
-
-    const rawAuthUser = localStorage.getItem("auth_user");
-    if (rawAuthUser) {
-      const authUser = JSON.parse(rawAuthUser);
-      const authUserId = String(authUser.id || authUser.userId || "");
-      const authUserEmail = String(authUser.email || "");
-      const isSameUser =
-        (!!authUserId && !!profile.id && authUserId === profile.id) ||
-        (!!authUserEmail && !!profile.email && authUserEmail === profile.email);
-
-      if (isSameUser) {
-        const nextAuthUser = {
-          ...authUser,
-          id: authUser.id || profile.id,
-          userId: authUser.userId || profile.id,
-          firstName: profile.firstName,
-          lastName: profile.lastName,
-          phone: profile.phone,
-          avatar: profile.avatar,
-        };
-
-        localStorage.setItem("auth_user", JSON.stringify(nextAuthUser));
-      }
-    }
-
-    window.dispatchEvent(
-      new CustomEvent("patient-profile:updated", { detail: profile }),
-    );
+    localStorage.setItem("patient_profile_cache", JSON.stringify(profile));
   } catch (error) {
     console.warn("[patientService] Failed to cache patient profile", error);
   }
@@ -3416,9 +3351,8 @@ function mapBackendToReview(item: any): Review {
   ).trim();
   const { firstName: doctorFirstName, lastName: doctorLastName } =
     splitDoctorName(rawDoctorName || null);
-  const { firstName: patientFirstName, lastName: patientLastName } = splitName(
-    rawPatientName || null,
-  );
+  const { firstName: patientFirstName, lastName: patientLastName } =
+    splitName(rawPatientName || null);
   const doctorObj = item.doctor;
   const patientObj = item.patient;
   const createdAt = String(
@@ -3507,10 +3441,7 @@ function mapBackendToReview(item: any): Review {
         : undefined;
 
   return {
-    id:
-      reviewId != null && String(reviewId).trim() !== ""
-        ? String(reviewId)
-        : "",
+    id: reviewId != null && String(reviewId).trim() !== "" ? String(reviewId) : "",
     patientId: patientId != null ? String(patientId) : "",
     patient: mappedPatient,
     doctorId: doctorId != null ? String(doctorId) : "",

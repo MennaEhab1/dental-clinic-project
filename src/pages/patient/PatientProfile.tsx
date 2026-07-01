@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
@@ -56,6 +56,9 @@ export default function PatientProfile() {
   const { user } = useAuth();
   const [patient, setPatient] = useState<Patient>(buildFallbackPatient(user));
   const [isLoading, setIsLoading] = useState(true);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null); // base64 for display
+  const [avatarFile, setAvatarFile] = useState<File | null>(null); // File for upload
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -112,7 +115,6 @@ export default function PatientProfile() {
         const profileResponse = await patientService.getProfile(fallback);
         const cached = loadCachedPatient();
         const nextPatient = profileResponse.data || cached || fallback;
-
         setPatient(nextPatient);
         cachePatient(nextPatient);
       } catch (error) {
@@ -140,29 +142,118 @@ export default function PatientProfile() {
     });
   }, [patient]);
 
+  const handleAvatarClick = () => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file",
+        description: "Please select an image file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "File too large",
+        description: "Please choose an image smaller than 5 MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Keep File for upload + generate base64 preview for display
+    setAvatarFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setAvatarPreview(ev.target?.result as string);
+      toast({
+        title: "Photo selected",
+        description: "New photo preview loaded. Click Save Changes to apply.",
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const handleSave = async () => {
     try {
-      const updated = await patientService.updateProfile(
-        {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          phone: formData.phone,
-          address: formData.address,
-          gender: formData.gender,
-          dateOfBirth: formData.dateOfBirth,
-        },
-        patient,
+      // Build payload — always fall back to existing patient values so the
+      // backend never receives empty strings for its required fields.
+      const firstName = (
+        formData.firstName.trim() ||
+        patient.firstName ||
+        ""
+      ).trim();
+      const lastName = (
+        formData.lastName.trim() ||
+        patient.lastName ||
+        ""
+      ).trim();
+      const phone = (formData.phone.trim() || patient.phone || "").trim();
+      const address = (formData.address.trim() || patient.address || "").trim();
+      const gender = formData.gender || patient.gender || "other";
+      const dateOfBirth = formData.dateOfBirth || patient.dateOfBirth || null;
+
+      // Validate required fields BEFORE sending to avoid 400 from backend
+      const missing: string[] = [];
+      if (!firstName) missing.push("First Name");
+      if (!lastName) missing.push("Last Name");
+      if (!phone) missing.push("Phone");
+      if (!address) missing.push("Address");
+      if (!gender) missing.push("Gender");
+
+      if (missing.length > 0) {
+        toast({
+          title: "Missing required fields",
+          description: `Please fill in: ${missing.join(", ")}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        firstName,
+        lastName,
+        phone,
+        address,
+        gender,
+        dateOfBirth,
+      };
+      // Attach the selected File so updateProfile can append it to FormData
+      if (avatarFile) payload.profileImage = avatarFile;
+
+      console.log(
+        "[PatientProfile] PUT /api/patient/profile payload fields:",
+        Object.keys(payload),
       );
 
-      setPatient(updated.data);
+      const updated = await patientService.updateProfile(payload, patient);
+
+      const updatedPatient: Patient = {
+        ...updated.data,
+        ...(avatarPreview ? { avatar: avatarPreview } : {}),
+      };
+
+      setPatient(updatedPatient);
+
       try {
         localStorage.setItem(
           "patient_profile_cache",
-          JSON.stringify(updated.data),
+          JSON.stringify(updatedPatient),
         );
+        window.dispatchEvent(new Event("patient:profile-updated"));
       } catch (error) {
         console.warn("[PatientProfile] Failed to cache updated profile", error);
       }
+
       toast({
         title: "Profile Updated",
         description: "Your profile has been saved successfully.",
@@ -171,7 +262,10 @@ export default function PatientProfile() {
       console.error("Failed to update profile:", error);
       toast({
         title: "Error",
-        description: "Failed to save profile changes.",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to save profile changes.",
         variant: "destructive",
       });
     }
@@ -201,6 +295,8 @@ export default function PatientProfile() {
       </DashboardLayout>
     );
   }
+
+  const avatarSrc = avatarPreview || patient.avatar || "";
 
   return (
     <DashboardLayout role="patient">
@@ -237,16 +333,26 @@ export default function PatientProfile() {
                 <div className="flex items-center gap-4">
                   <div className="relative">
                     <Avatar className="h-20 w-20">
-                      <AvatarImage src={patient.avatar} />
+                      <AvatarImage src={avatarSrc} />
                       <AvatarFallback className="text-xl">
                         {patient.firstName[0]}
                         {patient.lastName[0]}
                       </AvatarFallback>
                     </Avatar>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarChange}
+                    />
                     <Button
                       size="icon"
                       variant="outline"
                       className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full"
+                      onClick={handleAvatarClick}
+                      type="button"
+                      title="Change profile photo"
                     >
                       <Camera className="w-3.5 h-3.5" />
                     </Button>
@@ -255,12 +361,17 @@ export default function PatientProfile() {
                     <p className="font-semibold text-foreground">
                       {patient.firstName} {patient.lastName}
                     </p>
-                    <p className="text-sm text-muted-foreground">
+                    {/* <p className="text-sm text-muted-foreground">
                       Patient ID: {patient.id}
-                    </p>
-                    <Badge className="mt-1 bg-success/10 text-success">
+                    </p> */}
+                    {/* <Badge className="mt-1 bg-success/10 text-success">
                       Active
-                    </Badge>
+                    </Badge> */}
+                    {avatarPreview && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        New photo selected — click Save to apply.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -334,7 +445,8 @@ export default function PatientProfile() {
                   </div>
                   <div className="space-y-2">
                     <Label>Gender</Label>
-                    <Input
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       value={formData.gender}
                       onChange={(e) =>
                         setFormData({
@@ -342,7 +454,11 @@ export default function PatientProfile() {
                           gender: e.target.value as "male" | "female" | "other",
                         })
                       }
-                    />
+                    >
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
                   </div>
                 </div>
 

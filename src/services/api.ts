@@ -1,5 +1,3 @@
-
-
 import { ApiResponse, PaginatedResponse } from "@/types";
 // TODO :  امسح جزء ال mockdata
 import {
@@ -198,6 +196,12 @@ function toOptionalIsoDate(value?: string | null): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function normalizePersonNameSegment(value?: string | null): string {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function mapBackendPatientProfileToPatient(
   raw: unknown,
   fallback?: Partial<Patient>,
@@ -205,7 +209,15 @@ function mapBackendPatientProfileToPatient(
   const item =
     raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const { firstName: splitFirstName, lastName: splitLastName } = splitName(
-    String(item.fullName || item.name || item.userName || "").trim(),
+    String(
+      item.fullName ||
+        item.FullName ||
+        item.name ||
+        item.Name ||
+        item.userName ||
+        item.UserName ||
+        "",
+    ).trim(),
   );
 
   const rawGender = String(item.gender || fallback?.gender || "other")
@@ -216,31 +228,72 @@ function mapBackendPatientProfileToPatient(
       ? rawGender
       : "other";
 
+  const avatarRaw = String(
+    item.avatar ||
+      item.Avatar ||
+      item.profileImage ||
+      item.ProfileImage ||
+      item.imageUrl ||
+      item.ImageUrl ||
+      fallback?.avatar ||
+      "",
+  );
+  const avatar = resolveBackendAssetUrl(avatarRaw) || avatarRaw;
+
   return {
-    id: String(item.id || item.patientId || item.userId || fallback?.id || ""),
-    email: String(item.email || fallback?.email || ""),
+    id: String(
+      item.id ||
+        item.Id ||
+        item.patientId ||
+        item.PatientId ||
+        item.userId ||
+        item.UserId ||
+        fallback?.id ||
+        "",
+    ),
+    email: String(item.email || item.Email || fallback?.email || ""),
     firstName: String(
       item.firstName ||
+        item.FirstName ||
         item.first_name ||
         fallback?.firstName ||
         splitFirstName,
     ),
     lastName: String(
-      item.lastName || item.last_name || fallback?.lastName || splitLastName,
+      item.lastName ||
+        item.LastName ||
+        item.last_name ||
+        fallback?.lastName ||
+        splitLastName,
     ),
-    phone: String(item.phone || item.phoneNumber || fallback?.phone || ""),
-    avatar: String(item.avatar || item.profileImage || fallback?.avatar || ""),
+    phone: String(
+      item.phone ||
+        item.Phone ||
+        item.phoneNumber ||
+        item.PhoneNumber ||
+        fallback?.phone ||
+        "",
+    ),
+    avatar,
     role: "patient",
     dateOfBirth: normalizeDateForInput(
-      String(item.dateOfBirth || fallback?.dateOfBirth || ""),
+      String(
+        item.dateOfBirth || item.DateOfBirth || fallback?.dateOfBirth || "",
+      ),
     ),
     gender,
-    address: String(item.address || fallback?.address || ""),
+    address: String(item.address || item.Address || fallback?.address || ""),
     createdAt: String(
-      item.createdAt || fallback?.createdAt || new Date().toISOString(),
+      item.createdAt ||
+        item.CreatedAt ||
+        fallback?.createdAt ||
+        new Date().toISOString(),
     ),
     updatedAt: String(
-      item.updatedAt || fallback?.updatedAt || new Date().toISOString(),
+      item.updatedAt ||
+        item.UpdatedAt ||
+        fallback?.updatedAt ||
+        new Date().toISOString(),
     ),
   };
 }
@@ -1795,7 +1848,10 @@ function mapBackendToMedicalRecord(item: any): MedicalRecord {
 
   const recordId = item.id ?? item.recordId ?? item.medicalRecordId;
   return {
-    id: recordId != null && String(recordId).trim() !== "" ? String(recordId) : "",
+    id:
+      recordId != null && String(recordId).trim() !== ""
+        ? String(recordId)
+        : "",
     appointmentId:
       item.appointmentId != null
         ? String(item.appointmentId)
@@ -2299,19 +2355,88 @@ export const patientService = {
     data: UpdatePatientProfileDto,
     fallback?: Partial<Patient>,
   ): Promise<ApiResponse<Patient>> {
-    const payload: UpdatePatientProfileDto = {
-      firstName: data.firstName ?? null,
-      lastName: data.lastName ?? null,
-      phone: data.phone ?? null,
-      address: data.address ?? null,
-      gender: data.gender ?? null,
-      dateOfBirth: toOptionalIsoDate(data.dateOfBirth) ?? null,
+    // Backend uses [FromForm] — must send multipart/form-data, NOT JSON.
+    // Always fall back to existing patient values so required fields are never empty.
+    const firstName =
+      normalizePersonNameSegment(data.firstName) ||
+      normalizePersonNameSegment(fallback?.firstName) ||
+      "";
+    const lastName =
+      normalizePersonNameSegment(data.lastName) ||
+      normalizePersonNameSegment(fallback?.lastName) ||
+      "";
+    const phone = data.phone?.trim() || fallback?.phone || "";
+    const address = data.address?.trim() || fallback?.address || "";
+    const gender = data.gender?.trim() || fallback?.gender || "other";
+    const dateOfBirth =
+      toOptionalIsoDate(data.dateOfBirth) ??
+      toOptionalIsoDate(fallback?.dateOfBirth) ??
+      "";
+
+    const maybeFile = (data as Record<string, unknown>).profileImage;
+
+    const buildFormData = (lastNameKey: "LastName" | "lastName") => {
+      const formData = new FormData();
+      // Match Swagger contract exactly; include a fallback key shape for
+      // LastName because this endpoint can be case-sensitive in some builds.
+      formData.append("FirstName", firstName);
+      formData.append(lastNameKey, lastName);
+      formData.append("Phone", phone);
+      formData.append("Address", address);
+      formData.append("Gender", gender);
+      if (dateOfBirth) formData.append("DateOfBirth", dateOfBirth);
+      if (maybeFile instanceof File) {
+        formData.append("ProfileImage", maybeFile);
+      }
+      return formData;
     };
 
-    await apiCall<unknown>("/api/patient/profile", {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    });
+    // Send FormData directly (bypass apiCall's JSON Content-Type header).
+    // The browser sets "multipart/form-data; boundary=..." automatically.
+    const token = getAuthToken();
+    const cleanToken = token ? token.replace(/^Bearer\s+/i, "") : "";
+
+    const sendUpdate = (lastNameKey: "LastName" | "lastName") =>
+      fetch(`${BASE_URL}/api/patient/profile`, {
+        method: "PUT",
+        mode: "cors",
+        credentials: "omit",
+        headers: cleanToken ? { Authorization: `Bearer ${cleanToken}` } : {},
+        body: buildFormData(lastNameKey),
+      });
+
+    let putResponse = await sendUpdate("LastName");
+
+    // Backend compatibility fallback: some deployments bind this field using
+    // camelCase `lastName` instead of `LastName` and return 500 otherwise.
+    if (!putResponse.ok && putResponse.status >= 500) {
+      const retryResponse = await sendUpdate("lastName");
+      if (retryResponse.ok) {
+        putResponse = retryResponse;
+      } else {
+        putResponse = retryResponse;
+      }
+    }
+
+    if (!putResponse.ok) {
+      const text = await putResponse.text();
+      let errorMsg = `${putResponse.status} ${putResponse.statusText}`;
+      try {
+        const json = JSON.parse(text);
+        if (json?.errors) {
+          errorMsg = (Object.values(json.errors) as string[][])
+            .flat()
+            .join("; ");
+        } else if (json?.message) {
+          errorMsg = json.message;
+        } else if (typeof json === "string") {
+          errorMsg = json;
+        }
+      } catch {
+        if (text) errorMsg = text;
+      }
+      throw new Error(errorMsg);
+    }
 
     const refreshed = await this.getProfile(fallback);
     if (refreshed.success) return refreshed;
@@ -2319,12 +2444,12 @@ export const patientService = {
     const mergedFallback = mapBackendPatientProfileToPatient(
       {
         ...(fallback || {}),
-        firstName: payload.firstName ?? fallback?.firstName,
-        lastName: payload.lastName ?? fallback?.lastName,
-        phone: payload.phone ?? fallback?.phone,
-        address: payload.address ?? fallback?.address,
-        gender: payload.gender ?? fallback?.gender,
-        dateOfBirth: payload.dateOfBirth ?? fallback?.dateOfBirth,
+        firstName: firstName || fallback?.firstName,
+        lastName: lastName || fallback?.lastName,
+        phone: phone || fallback?.phone,
+        address: address || fallback?.address,
+        gender: gender || fallback?.gender,
+        dateOfBirth: dateOfBirth || fallback?.dateOfBirth,
       },
       refreshed.data,
     );
@@ -3351,8 +3476,9 @@ function mapBackendToReview(item: any): Review {
   ).trim();
   const { firstName: doctorFirstName, lastName: doctorLastName } =
     splitDoctorName(rawDoctorName || null);
-  const { firstName: patientFirstName, lastName: patientLastName } =
-    splitName(rawPatientName || null);
+  const { firstName: patientFirstName, lastName: patientLastName } = splitName(
+    rawPatientName || null,
+  );
   const doctorObj = item.doctor;
   const patientObj = item.patient;
   const createdAt = String(
@@ -3441,7 +3567,10 @@ function mapBackendToReview(item: any): Review {
         : undefined;
 
   return {
-    id: reviewId != null && String(reviewId).trim() !== "" ? String(reviewId) : "",
+    id:
+      reviewId != null && String(reviewId).trim() !== ""
+        ? String(reviewId)
+        : "",
     patientId: patientId != null ? String(patientId) : "",
     patient: mappedPatient,
     doctorId: doctorId != null ? String(doctorId) : "",

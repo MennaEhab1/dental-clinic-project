@@ -609,7 +609,7 @@ export default function AdminDoctors() {
                           <div>
                             <div className="flex items-center gap-2">
                               <p className="font-semibold text-foreground">
-                                Dr. {doctor.firstName} {doctor.lastName}
+                                {doctor.firstName} {doctor.lastName}
                               </p>
                               <Badge
                                 variant={

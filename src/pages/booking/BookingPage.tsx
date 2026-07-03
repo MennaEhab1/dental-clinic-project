@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from "react";
+﻿import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -22,15 +22,11 @@ import { toast } from "sonner";
 import {
   doctorService,
   serviceService,
-  appointmentService,
   doctorScheduleService,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Doctor, Service } from "@/types";
 import DepositPage from "./DepositPage";
-
-const API_BASE =
-  import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
 
 type Step =
   | "service"
@@ -113,9 +109,10 @@ export default function BookingPage() {
   const [brokenDoctorImages, setBrokenDoctorImages] = useState<
     Record<string, boolean>
   >({});
-
-  // appointmentId returned from DepositPage after payment succeeds
-  const [appointmentId, setAppointmentId] = useState<number>(0);
+  const [paymentConfirmation, setPaymentConfirmation] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   const [booking, setBooking] = useState({
     serviceId: searchParams.get("service") || "",
@@ -329,62 +326,25 @@ export default function BookingPage() {
     }
   };
 
-  // Creates an appointment and returns its numeric ID.
-  // Called by DepositPage at the moment the user clicks "Pay Deposit",
-  // so no appointment is ever created unless the user actually attempts payment.
-  const createAppointmentAndGetId = useCallback(async (): Promise<number> => {
-    const patientId = user?.id || user?.userId || "unknown";
-
-    const resp = await appointmentService.create({
-      patientId,
-      doctorId: booking.doctorId,
-      serviceId: booking.serviceId,
-      date: booking.date,
-      time: booking.time,
-      duration: selectedService?.duration || 30,
-      status: "upcoming" as const,
-      notes: booking.notes,
-      ...(selectedService?.price ? { price: selectedService.price } : {}),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-
-    let newAppointmentId = Number(resp.data?.id) || 0;
-
-    // Fallback: if the response didn't include a numeric ID, fetch the
-    // appointments list and pick the most recently created matching entry.
-    if (!newAppointmentId) {
-      try {
-        const listResp = await appointmentService.getByPatient();
-        if (listResp.data && listResp.data.length > 0) {
-          const sorted = [...listResp.data].sort(
-            (a, b) => Number(b.id) - Number(a.id),
-          );
-          const latestId = Number(sorted[0].id);
-          if (latestId > 0) newAppointmentId = latestId;
-        }
-      } catch {
-        /* ignore fallback failures */
-      }
-    }
-
-    if (!newAppointmentId) {
-      throw new Error(
-        "Appointment was created but we could not retrieve its ID. Please contact support.",
-      );
-    }
-
-    return newAppointmentId;
-  }, [booking, selectedService, user]);
-
   // Called when user clicks Next on the Details step.
-  // Appointment creation is deferred to Pay-click in DepositPage.
   const handleDetailsNext = () => {
     setCurrentStep("deposit");
   };
 
-  // Called after successful deposit payment — appointmentId comes from DepositPage
-  const handlePaymentSuccess = (newAppointmentId: number) => {
-    setAppointmentId(newAppointmentId);
+  // Called after successful deposit payment.
+  const handlePaymentSuccess = () => {
+    try {
+      const rawConfirmation = localStorage.getItem("payment_confirmation");
+      if (rawConfirmation) {
+        setPaymentConfirmation(
+          JSON.parse(rawConfirmation) as Record<string, unknown>,
+        );
+        localStorage.removeItem("payment_confirmation");
+      }
+    } catch (_error) {
+      /* storage unavailable or malformed payload */
+    }
+
     try {
       setTimeout(() => {
         try {
@@ -426,8 +386,6 @@ export default function BookingPage() {
     }
   };
 
-  // Called when user backs out of the deposit step before paying.
-  // No appointment exists yet at this point, so nothing to cancel.
   const handleDepositBack = () => {
     setCurrentStep("details");
   };
@@ -438,7 +396,9 @@ export default function BookingPage() {
       <MainLayout>
         <DepositPage
           depositAmount={selectedService?.price}
-          createAppointmentAndGetId={createAppointmentAndGetId}
+          doctorId={booking.doctorId}
+          date={booking.date}
+          startTime={booking.time}
           onPaymentSuccess={handlePaymentSuccess}
           onBack={handleDepositBack}
         />
@@ -863,6 +823,74 @@ export default function BookingPage() {
                         booked.
                       </p>
                     </div>
+                    {paymentConfirmation && (
+                      <div className="rounded-2xl border border-border bg-muted/30 p-4 mb-6 text-left">
+                        <h3 className="font-bold text-green-500 text-foreground mb-3 text-center ">
+                          Please Check Your Email For Conformation Message
+                        </h3>
+                        <p className="  text-gray-400 mb-3 text-center ">
+                          Cancelling Your Appoinment Should Be Atleast 24hrs
+                          Before Appointment Date
+                        </p>
+                        {/* <div className="grid gap-3 text-sm">
+                          {[
+                            {
+                              label: "Appointment ID",
+                              value: String(
+                                paymentConfirmation["appointmentId"] ??
+                                  paymentConfirmation["appointmentID"] ??
+                                  paymentConfirmation["id"] ??
+                                  "-",
+                              ),
+                            },
+                            // {
+                            //   label: "Doctor",
+                            //   value: String(
+                            //     paymentConfirmation["doctorName"] ??
+                            //       paymentConfirmation["doctor"] ??
+                            //       `Dr. ${getDoctorDisplayName(selectedDoctor)}`,
+                            //   ),
+                            // },
+                            // {
+                            //   label: "Date",
+                            //   value: String(
+                            //     paymentConfirmation["date"] ??
+                            //       paymentConfirmation["appointmentDate"] ??
+                            //       booking.date,
+                            //   ),
+                            // },
+                            // {
+                            //   label: "Time",
+                            //   value: String(
+                            //     paymentConfirmation["startTime"] ??
+                            //       paymentConfirmation["time"] ??
+                            //       booking.time,
+                            //   ),
+                            // },
+                            // {
+                            //   label: "Status",
+                            //   value: String(
+                            //     paymentConfirmation["status"] ??
+                            //       paymentConfirmation["appointmentStatus"] ??
+                            //       "Confirmed",
+                            //   ),
+                            // },
+                          ].map((item) => (
+                            <div
+                              key={item.label}
+                              className="flex justify-between gap-4 border-b border-border pb-3 last:border-b-0 last:pb-0"
+                            >
+                              <span className="text-muted-foreground">
+                                {item.label}
+                              </span>
+                              <span className="font-medium text-foreground text-right">
+                                {item.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div> */}
+                      </div>
+                    )}
                     <div className="space-y-4">
                       <div className="flex justify-between py-3 border-b border-border">
                         <span className="text-muted-foreground">Service</span>
@@ -897,14 +925,14 @@ export default function BookingPage() {
                           {selectedService?.duration} minutes
                         </span>
                       </div>
-                      <div className="flex justify-between py-3 text-lg">
+                      {/* <div className="flex justify-between py-3 text-lg">
                         <span className="font-medium text-foreground">
                           Total
                         </span>
                         <span className="font-bold gradient-text">
                           ${selectedService?.price}
                         </span>
-                      </div>
+                      </div> */}
                     </div>
                     <Button
                       className="gradient-bg border-0 w-full mt-6"

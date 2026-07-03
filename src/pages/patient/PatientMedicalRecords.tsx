@@ -33,7 +33,11 @@ import {
   Loader2,
 } from "lucide-react";
 import type { MedicalRecord, Prescription } from "@/types";
-import { medicalRecordService, prescriptionService, isBackendMedicalRecordId } from "@/services/api";
+import {
+  medicalRecordService,
+  prescriptionService,
+  isBackendMedicalRecordId,
+} from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import type { PrescriptionDetailsDTO } from "@/types/swagger";
@@ -300,15 +304,15 @@ export default function PatientMedicalRecords() {
             <TabsTrigger value="all">
               All Records ({records.length})
             </TabsTrigger>
-            <TabsTrigger value="treatments">
+            {/* <TabsTrigger value="treatments">
               Treatments ({treatments.length})
             </TabsTrigger>
             <TabsTrigger value="diagnoses">
               Diagnoses ({diagnoses.length})
             </TabsTrigger>
             <TabsTrigger value="prescriptions">
-              Prescriptions ({prescriptions.length})
-            </TabsTrigger>
+              Prescriptions ({prescriptions.length}) */}
+            {/* </TabsTrigger> */}
           </TabsList>
 
           {(
@@ -328,7 +332,11 @@ export default function PatientMedicalRecords() {
                     <div className="space-y-3">
                       {data.map((record, index) => (
                         <RecordCard
-                          key={record.id || record.appointmentId || `record-${index}`}
+                          key={
+                            record.id ||
+                            record.appointmentId ||
+                            `record-${index}`
+                          }
                           record={record}
                         />
                       ))}
@@ -397,17 +405,17 @@ export default function PatientMedicalRecords() {
                   </div>
 
                   {/* Treatment */}
-                  <div>
+                  {/* <div>
                     <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                       Treatment
                     </h4>
                     <p className="text-sm text-foreground">
                       {selectedRecord.treatment || "—"}
                     </p>
-                  </div>
+                  </div> */}
 
                   {/* Tooth number */}
-                  {selectedRecord.toothNumber && (
+                  {/* {selectedRecord.toothNumber && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                         Tooth Number
@@ -416,7 +424,7 @@ export default function PatientMedicalRecords() {
                         {selectedRecord.toothNumber}
                       </Badge>
                     </div>
-                  )}
+                  )} */}
 
                   {/* Notes */}
                   <div>
@@ -429,7 +437,7 @@ export default function PatientMedicalRecords() {
                   </div>
 
                   {/* Prescription */}
-                  {selectedRecord.prescription && (
+                  {/* {selectedRecord.prescription && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                         Prescription
@@ -464,7 +472,7 @@ export default function PatientMedicalRecords() {
                         )}
                       </div>
                     </div>
-                  )}
+                  )} */}
 
                   {/* Attachments */}
                   {selectedRecord.attachments &&

@@ -740,7 +740,9 @@ export default function DoctorMedicalRecords() {
                   const Icon = typeIcons[record.type] || FileText;
                   return (
                     <motion.div
-                      key={record.id || record.appointmentId || `record-${index}`}
+                      key={
+                        record.id || record.appointmentId || `record-${index}`
+                      }
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 }}
@@ -788,12 +790,12 @@ export default function DoctorMedicalRecords() {
                           </span>
                           {record.toothNumber && (
                             <>
-                              <span className="text-xs text-muted-foreground">
+                              {/* <span className="text-xs text-muted-foreground">
                                 •
-                              </span>
-                              <span className="text-xs text-muted-foreground">
+                              </span> */}
+                              {/* <span className="text-xs text-muted-foreground">
                                 Tooth: {record.toothNumber}
-                              </span>
+                              </span> */}
                             </>
                           )}
                         </div>

@@ -658,14 +658,14 @@ export default function AdminDoctors() {
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
-                            <Button
+                            {/* <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive"
                               onClick={() => handleDelete(doctor.id)}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+                            </Button> */}
                           </div>
                         </div>
                         <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">

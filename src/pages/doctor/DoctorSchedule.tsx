@@ -21,9 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Clock, Plus, CalendarDays, RefreshCw } from "lucide-react";
+import { Clock, Plus, CalendarDays, RefreshCw, Trash2 } from "lucide-react";
 import {
   doctorScheduleService,
+  doctorService,
   authService,
   type DoctorSchedule,
 } from "@/services/api";
@@ -83,11 +84,27 @@ function formatTime(dateSpan: string): string {
   return String(dateSpan || "").slice(0, 5);
 }
 
+function getWeekDayNameFromDate(dateValue?: string): string {
+  const raw = String(dateValue || "").trim();
+  if (!raw) return "";
+
+  const normalized = raw.includes("T") ? raw : `${raw}T00:00:00`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  return DAYS_OF_WEEK[parsed.getDay()] || "";
+}
+
 export default function DoctorSchedulePage() {
   const [schedule, setSchedule] = useState<DoctorSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<number | null>(
+    null,
+  );
+  const [pendingDeleteSlot, setPendingDeleteSlot] =
+    useState<DoctorSchedule | null>(null);
   const [form, setForm] = useState<ScheduleFormState>(initialForm);
   const [refreshKey, setRefreshKey] = useState(0);
   // Numeric doctor ID resolved from JWT claims or appointments fallback
@@ -214,6 +231,91 @@ export default function DoctorSchedulePage() {
       });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSchedule = (slot: DoctorSchedule) => {
+    const scheduleId = Number(slot.id);
+    if (!Number.isFinite(scheduleId) || scheduleId <= 0) {
+      toast({
+        title: "Cannot remove schedule",
+        description: "This schedule block has an invalid ID.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setPendingDeleteSlot(slot);
+  };
+
+  const confirmDeleteSchedule = async () => {
+    if (!pendingDeleteSlot) return;
+    const slot = pendingDeleteSlot;
+    const scheduleId = Number(slot.id);
+    const dayLabel = String(slot.dayOfWeek || "").trim();
+
+    setPendingDeleteSlot(null);
+
+    setDeletingScheduleId(scheduleId);
+    try {
+      const appointmentsRes = await doctorService.getAppointments();
+      const appointments = appointmentsRes.data || [];
+      const normalizeDoctorId = (value: unknown): string => {
+        const raw = String(value ?? "").trim();
+        if (!raw) return "";
+        if (/^\d+$/.test(raw)) return String(Number(raw));
+        return raw.toLowerCase();
+      };
+      const currentDoctorId = normalizeDoctorId(resolvedDoctorId ?? user?.id);
+      const scheduleDay = String(slot.dayOfWeek).toLowerCase();
+
+      const hasBookedAppointmentsInDay = appointments.some((appointment) => {
+        if (appointment.status !== "upcoming") return false;
+        if (currentDoctorId) {
+          const appointmentDoctorId = normalizeDoctorId(
+            appointment.doctorId || appointment.doctor?.id,
+          );
+          if (appointmentDoctorId !== currentDoctorId) return false;
+        }
+
+        const appointmentDay = getWeekDayNameFromDate(appointment.date);
+        return appointmentDay.toLowerCase() === scheduleDay;
+      });
+
+      if (hasBookedAppointmentsInDay) {
+        toast({
+          title: "Cannot remove this schedule",
+          description:
+            "There are booked appointments on this day. Please cancel or reschedule them first.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const deleteRes = await doctorScheduleService.remove(scheduleId);
+      if (deleteRes.success) {
+        toast({
+          title: "Schedule removed",
+          description: `${dayLabel} ${formatTime(slot.startTime)}-${formatTime(slot.endTime)} was removed.`,
+        });
+        fetchSchedule();
+      } else {
+        toast({
+          title: "Failed to remove schedule",
+          description:
+            deleteRes.message || "Backend rejected the delete request.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Failed to remove schedule",
+        description:
+          error instanceof Error ? error.message : "Unexpected error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingScheduleId(null);
     }
   };
 
@@ -348,9 +450,24 @@ export default function DoctorSchedulePage() {
                             {formatTime(slot.startTime)} –{" "}
                             {formatTime(slot.endTime)}
                           </div>
-                          <Badge variant="outline" className="text-[10px]">
-                            {slot.slotDurationMinutes} min
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="outline" className="text-[10px]">
+                              {slot.slotDurationMinutes} min
+                            </Badge>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteSchedule(slot)}
+                              disabled={
+                                deletingScheduleId === Number(slot.id) ||
+                                !slot.id
+                              }
+                              title="Remove schedule block"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </CardContent>
@@ -475,6 +592,44 @@ export default function DoctorSchedulePage() {
                   {isSubmitting ? "Saving..." : "Save Schedule"}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={!!pendingDeleteSlot}
+          onOpenChange={(open) => {
+            if (!open) setPendingDeleteSlot(null);
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-display">
+                Remove Schedule Block
+              </DialogTitle>
+              <DialogDescription>
+                {pendingDeleteSlot
+                  ? `Are you sure you want to remove ${pendingDeleteSlot.dayOfWeek} ${formatTime(pendingDeleteSlot.startTime)}-${formatTime(pendingDeleteSlot.endTime)}?`
+                  : "Are you sure you want to remove this schedule block?"}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setPendingDeleteSlot(null)}
+                disabled={deletingScheduleId !== null}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={confirmDeleteSchedule}
+                disabled={deletingScheduleId !== null}
+              >
+                {deletingScheduleId !== null ? "Removing..." : "Remove"}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

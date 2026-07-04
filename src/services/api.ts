@@ -4687,4 +4687,25 @@ export const doctorScheduleService = {
       return { data: {} as DoctorSchedule, success: false, message };
     }
   },
+
+  /**
+   * Delete a schedule entry
+   * DELETE /api/DoctorSchedule/{id}
+   */
+  async remove(id: number): Promise<ApiResponse<void>> {
+    try {
+      await apiCall<void>(`/api/DoctorSchedule/${id}`, {
+        method: "DELETE",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Schedule removed successfully",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("[doctorScheduleService.remove] Error:", message, error);
+      return { data: undefined, success: false, message };
+    }
+  },
 };

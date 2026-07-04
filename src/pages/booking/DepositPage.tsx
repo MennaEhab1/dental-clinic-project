@@ -85,6 +85,17 @@ function formatCountdown(totalSeconds: number): string {
   return `${minutes}:${seconds}`;
 }
 
+function getStripeFailureMessage(
+  stripeMessage?: string | null,
+  fallbackMessage?: string | null,
+): string {
+  return (
+    stripeMessage?.trim() ||
+    fallbackMessage?.trim() ||
+    "Payment failed. Please check your card details and try again."
+  );
+}
+
 function getConfirmationSummary(
   confirmation: Record<string, unknown> | null,
 ): Array<{ label: string; value: string }> {
@@ -265,7 +276,9 @@ function CheckoutForm({
 
       if (effectiveExpiresAt && Date.now() >= effectiveExpiresAt) {
         setSessionExpired(true);
-        throw new Error("Payment session expired. Please go back and try again.");
+        throw new Error(
+          "Payment session expired. Please go back and try again.",
+        );
       }
 
       // Step 2: Confirm the card payment with Stripe Elements.
@@ -278,64 +291,76 @@ function CheckoutForm({
           payment_method: { card: cardElement },
         });
 
-      if (stripeError) throw new Error(stripeError.message ?? "Payment failed");
+      if (stripeError) {
+        // Stripe validation/decline errors should stay on this page so users can retry.
+        setError(getStripeFailureMessage(stripeError.message));
+        setLoading(false);
+        return;
+      }
 
       if (effectiveExpiresAt && Date.now() >= effectiveExpiresAt) {
         throw new Error("Payment session expired. Please try again.");
       }
 
-      if (paymentIntent?.status === "succeeded") {
-        const confirmRes = await postPaymentConfirmWithRefresh(
-          currentSession.paymentIntentId,
-          token,
+      if (paymentIntent?.status !== "succeeded") {
+        setError(
+          getStripeFailureMessage(
+            paymentIntent?.last_payment_error?.message,
+            "Payment was not completed. Please try again.",
+          ),
         );
-
-        if (!confirmRes.ok) {
-          const errText = await confirmRes.text().catch(() => "");
-          let errMessage = `Payment confirmation failed (HTTP ${confirmRes.status})`;
-
-          try {
-            const errData = JSON.parse(errText) as Record<string, unknown>;
-            errMessage =
-              (errData.message as string) ||
-              (errData.title as string) ||
-              (errData.detail as string) ||
-              (typeof errData.errors === "object"
-                ? JSON.stringify(errData.errors)
-                : "") ||
-              errMessage;
-          } catch {
-            if (errText) errMessage = errText;
-          }
-
-          throw new Error(errMessage);
-        }
-
-        const confirmText = await confirmRes.text();
-        let confirmation: Record<string, unknown> = {
-          paymentIntentId: currentSession.paymentIntentId,
-        };
-
-        if (confirmText) {
-          try {
-            const parsed = JSON.parse(confirmText) as Record<string, unknown>;
-            confirmation = {
-              ...parsed,
-              paymentIntentId: currentSession.paymentIntentId,
-            };
-          } catch {
-            confirmation = {
-              paymentIntentId: currentSession.paymentIntentId,
-              message: confirmText,
-            };
-          }
-        }
-
-        onSuccess(confirmation);
         setLoading(false);
-      } else {
-        throw new Error("Payment was not completed. Please try again.");
+        return;
       }
+
+      const confirmRes = await postPaymentConfirmWithRefresh(
+        currentSession.paymentIntentId,
+        token,
+      );
+
+      if (!confirmRes.ok) {
+        const errText = await confirmRes.text().catch(() => "");
+        let errMessage = `Payment confirmation failed (HTTP ${confirmRes.status})`;
+
+        try {
+          const errData = JSON.parse(errText) as Record<string, unknown>;
+          errMessage =
+            (errData.message as string) ||
+            (errData.title as string) ||
+            (errData.detail as string) ||
+            (typeof errData.errors === "object"
+              ? JSON.stringify(errData.errors)
+              : "") ||
+            errMessage;
+        } catch {
+          if (errText) errMessage = errText;
+        }
+
+        throw new Error(errMessage);
+      }
+
+      const confirmText = await confirmRes.text();
+      let confirmation: Record<string, unknown> = {
+        paymentIntentId: currentSession.paymentIntentId,
+      };
+
+      if (confirmText) {
+        try {
+          const parsed = JSON.parse(confirmText) as Record<string, unknown>;
+          confirmation = {
+            ...parsed,
+            paymentIntentId: currentSession.paymentIntentId,
+          };
+        } catch {
+          confirmation = {
+            paymentIntentId: currentSession.paymentIntentId,
+            message: confirmText,
+          };
+        }
+      }
+
+      onSuccess(confirmation);
+      setLoading(false);
     } catch (err) {
       setError(
         err instanceof Error

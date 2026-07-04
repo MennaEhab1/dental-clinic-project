@@ -2,7 +2,14 @@ import { motion } from "framer-motion";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
-import { Menu, X, Phone, Calendar, LayoutDashboard, LogOut } from "lucide-react";
+import {
+  Menu,
+  X,
+  Phone,
+  Calendar,
+  LayoutDashboard,
+  LogOut,
+} from "lucide-react";
 import { useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/contexts/AuthContext";
@@ -168,7 +175,10 @@ export function Header() {
               <div className="border-t border-border my-2" />
               {isAuthenticated ? (
                 <>
-                  <Link to={resolveDashboardRoute()} onClick={() => setIsOpen(false)}>
+                  <Link
+                    to={resolveDashboardRoute()}
+                    onClick={() => setIsOpen(false)}
+                  >
                     <Button variant="ghost" className="w-full justify-start">
                       <LayoutDashboard className="w-4 h-4 mr-2" />
                       Dashboard

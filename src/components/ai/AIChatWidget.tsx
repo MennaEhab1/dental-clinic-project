@@ -1,10 +1,4 @@
 
-
-
-
-
-
-
 // import { useState, useRef, useEffect, useCallback } from 'react';
 // import { motion, AnimatePresence } from 'framer-motion';
 // import { MessageCircle, X, Send } from 'lucide-react';
@@ -27,10 +21,6 @@
 
 //   const messagesEndRef = useRef<HTMLDivElement>(null);
 //   const inputRef = useRef<HTMLInputElement>(null);
-
-//   useEffect(() => {
-//     setIsOpen(externalOpen);
-//   }, [externalOpen]);
 
 //   const scrollToBottom = useCallback(() => {
 //     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -186,11 +176,24 @@
 
 
 
+
+
+
+
+
+
+
+
+
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageCircle, X, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { sendChatMessage, getWelcomeMessage, type ChatMessage } from '@/services/aiChatService';
+import {
+  sendChatMessage,
+  getWelcomeMessage,
+  type ChatMessage,
+} from '@/services/aiChatService';
 
 interface AIChatWidgetProps {
   disease: string;
@@ -198,13 +201,20 @@ interface AIChatWidgetProps {
   onClose?: () => void;
 }
 
-export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }: AIChatWidgetProps) {
+export function AIChatWidget({
+  disease,
+  isOpen: externalOpen = false,
+  onClose,
+}: AIChatWidgetProps) {
   const [isOpen, setIsOpen] = useState(externalOpen);
   const [messages, setMessages] = useState<ChatMessage[]>([
     getWelcomeMessage(disease),
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+
+  // Session ID ثابت طوال فترة فتح الصفحة
+  const SESSION_ID = useRef(`session-${Date.now()}`).current;
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -237,27 +247,32 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
       timestamp: new Date().toISOString(),
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
 
     try {
-      const response = await sendChatMessage(disease, text);
-      setMessages(prev => [...prev, response]);
+      const response = await sendChatMessage(
+        disease,
+        text,
+        SESSION_ID
+      );
+
+      setMessages((prev) => [...prev, response]);
     } catch {
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
           role: 'assistant',
-          content: "❌ Unable to connect to AI service",
+          content: '❌ Unable to connect to AI service',
           timestamp: new Date().toISOString(),
         },
       ]);
     } finally {
       setIsTyping(false);
     }
-  }, [input, isTyping, disease]);
+  }, [input, isTyping, disease, SESSION_ID]);
 
   const renderContent = (content: string) => {
     return content.split('\n').map((line, i) => (
@@ -270,7 +285,6 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
 
   return (
     <>
-      {/* Floating Button */}
       <AnimatePresence>
         {!isOpen && (
           <motion.div
@@ -290,7 +304,6 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
         )}
       </AnimatePresence>
 
-      {/* Chat Panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -299,7 +312,6 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             className="fixed bottom-6 right-6 z-[9999] w-[360px] h-[520px] flex flex-col rounded-2xl border bg-white shadow-lg"
           >
-            {/* Header */}
             <div className="bg-blue-600 px-4 py-3 flex justify-between items-center rounded-t-2xl">
               <span className="text-white font-semibold">AI Assistant</span>
               <Button size="icon" variant="ghost" onClick={handleClose}>
@@ -307,10 +319,12 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
               </Button>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map((msg) => (
-                <div key={msg.id} className={msg.role === 'user' ? 'text-right' : ''}>
+                <div
+                  key={msg.id}
+                  className={msg.role === 'user' ? 'text-right' : ''}
+                >
                   <div
                     className={`inline-block px-3 py-2 rounded-xl text-sm ${
                       msg.role === 'user'
@@ -330,7 +344,6 @@ export function AIChatWidget({ disease, isOpen: externalOpen = false, onClose }:
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();

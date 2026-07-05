@@ -41,6 +41,8 @@ export interface Doctor extends User {
   experience: number;
   bio: string;
   consultationFee: number;
+  averageRating?: number;
+  totalReviews?: number;
   rating: number;
   reviewCount: number;
   availableSlots: TimeSlot[];

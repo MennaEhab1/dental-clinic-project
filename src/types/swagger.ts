@@ -56,6 +56,12 @@ export interface ResetPasswordDTO {
   newPassword?: string | null;
 }
 
+export interface ChangePasswordDTO {
+  currentPassword?: string | null;
+  newPassword?: string | null;
+  confirmPassword?: string | null;
+}
+
 export interface AuthResponseDTO {
   token?: string | null;
   refreshToken?: string | null;
@@ -178,6 +184,7 @@ export const SwaggerTypes = {
   RegisterDTO: undefined as unknown as RegisterDTO,
   UpdatePatientProfileDto: undefined as unknown as UpdatePatientProfileDto,
   ResetPasswordDTO: undefined as unknown as ResetPasswordDTO,
+  ChangePasswordDTO: undefined as unknown as ChangePasswordDTO,
   UserDTO: undefined as unknown as UserDTO,
   CreatePrescriptionDto: undefined as unknown as CreatePrescriptionDto,
   PrescriptionDetailsDTO: undefined as unknown as PrescriptionDetailsDTO,

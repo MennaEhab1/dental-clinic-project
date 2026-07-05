@@ -29,6 +29,7 @@ import type {
 import type {
   AuthResponseDTO,
   BookAppointmentDto,
+  ChangePasswordDTO,
   CreatePrescriptionDto,
   ForgotPasswordDTO,
   PrescriptionDetailsDTO,
@@ -1147,6 +1148,23 @@ export const authService = {
     };
   },
 
+  async changePassword(data: ChangePasswordDTO): Promise<ApiResponse<void>> {
+    await apiCall<void>("/api/Account/change-password", {
+      method: "PUT",
+      body: JSON.stringify({
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+        confirmPassword: data.confirmPassword,
+      }),
+    });
+
+    return {
+      data: undefined,
+      success: true,
+      message: "Password updated successfully",
+    };
+  },
+
   /**
    * Login with email and password
    * POST /api/Account/login
@@ -2076,6 +2094,10 @@ export const doctorService = {
         // Map DoctorDTO from backend to Doctor type
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const doctors = (res.data as any[]).map((doc: any) => {
+          const averageRating =
+            doc.averageRating ?? doc.rating ?? doc.reviewCount ?? 0;
+          const totalReviews =
+            doc.totalReviews ?? doc.reviewCount ?? doc.rating ?? 0;
           const fallbackName =
             doc.name ??
             doc.fullName ??
@@ -2111,12 +2133,14 @@ export const doctorService = {
             qualifications: doc.qualifications ?? [],
             bio: doc.bio ?? doc.description ?? "",
             consultationFee: doc.consultationFee ?? 0,
-            rating: doc.rating ?? 0,
+            averageRating,
+            totalReviews,
+            rating: averageRating,
             totalPatients: doc.totalPatients ?? 0,
             department: doc.department ?? "General",
             clinic: doc.clinic ?? "",
             availableSlots: doc.availableSlots ?? [],
-            reviewCount: doc.reviewCount ?? 0,
+            reviewCount: totalReviews,
             workingDays: doc.workingDays ?? [],
             firstName: normalizedFirstName,
             lastName: normalizedLastName,
@@ -2160,6 +2184,10 @@ export const doctorService = {
       if (res.data && Array.isArray(res.data) && res.data.length > 0) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const doctors = (res.data as any[]).map((doc: any) => {
+          const averageRating =
+            doc.averageRating ?? doc.rating ?? doc.reviewCount ?? 0;
+          const totalReviews =
+            doc.totalReviews ?? doc.reviewCount ?? doc.rating ?? 0;
           const fallbackName =
             doc.name ??
             doc.fullName ??
@@ -2187,12 +2215,14 @@ export const doctorService = {
             qualifications: doc.qualifications ?? [],
             bio: doc.bio ?? doc.description ?? "",
             consultationFee: doc.consultationFee ?? 0,
-            rating: doc.rating ?? 0,
+            averageRating,
+            totalReviews,
+            rating: averageRating,
             totalPatients: doc.totalPatients ?? 0,
             department: doc.department ?? "General",
             clinic: doc.clinic ?? "",
             availableSlots: doc.availableSlots ?? [],
-            reviewCount: doc.reviewCount ?? 0,
+            reviewCount: totalReviews,
             workingDays: doc.workingDays ?? [],
             firstName: stripDoctorTitle(
               doc.firstName ?? normalizedName.firstName,
@@ -3895,8 +3925,10 @@ export const adminDoctorService = {
       bio: doc.bio ?? "",
       // consultationFee is returned directly; salary is the backend storage name
       consultationFee: doc.consultationFee ?? doc.salary ?? 0,
-      rating: doc.rating ?? 0,
-      reviewCount: doc.reviewCount ?? 0,
+      averageRating: doc.averageRating ?? doc.rating ?? 0,
+      totalReviews: doc.totalReviews ?? doc.reviewCount ?? 0,
+      rating: doc.averageRating ?? doc.rating ?? 0,
+      reviewCount: doc.totalReviews ?? doc.reviewCount ?? 0,
       availableSlots: doc.availableSlots ?? [],
       workingDays: doc.workingDays ?? [],
       isActive:

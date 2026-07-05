@@ -43,6 +43,8 @@ const specialtyLabels: Record<string, string> = {
 
 export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
   const [reviewsOpen, setReviewsOpen] = useState(false);
+  const averageRating = doctor.averageRating ?? doctor.rating ?? 0;
+  const totalReviews = doctor.totalReviews ?? doctor.reviewCount ?? 0;
   const normalizedFirstName = (doctor.firstName || "")
     .replace(/^\s*dr\.?\s+/i, "")
     .trim();
@@ -77,7 +79,12 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
           </div>
           <div className="flex items-center gap-1">
             <Star className="w-4 h-4 text-warning fill-warning" />
-            <span className="text-sm font-medium">{doctor.rating}</span>
+            <span className="text-sm font-medium">
+              {averageRating.toFixed(1)}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              ({totalReviews})
+            </span>
           </div>
           <Button
             type="button"
@@ -125,9 +132,11 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
             </div>
             <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-lg">
               <Star className="w-4 h-4 text-warning fill-warning" />
-              <span className="text-sm font-medium">{doctor.rating}</span>
+              <span className="text-sm font-medium">
+                {averageRating.toFixed(1)}
+              </span>
               <span className="text-xs text-muted-foreground">
-                ({doctor.reviewCount})
+                ({totalReviews})
               </span>
             </div>
           </div>

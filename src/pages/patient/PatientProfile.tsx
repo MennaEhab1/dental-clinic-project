@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
@@ -24,7 +23,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { patientService } from "@/services/api";
+import { authService, patientService } from "@/services/api";
 import type { Patient } from "@/types";
 
 function buildFallbackPatient(
@@ -74,6 +73,7 @@ export default function PatientProfile() {
     new: "",
     confirm: "",
   });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const [notifications, setNotifications] = useState({
     appointments: true,
@@ -271,7 +271,20 @@ export default function PatientProfile() {
     }
   };
 
-  const handlePasswordChange = () => {
+  const handlePasswordChange = async () => {
+    const currentPassword = passwords.current.trim();
+    const newPassword = passwords.new.trim();
+    const confirmPassword = passwords.confirm.trim();
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast({
+        title: "Missing required fields",
+        description: "Please fill in current, new, and confirmation password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (passwords.new !== passwords.confirm) {
       toast({
         title: "Error",
@@ -280,12 +293,31 @@ export default function PatientProfile() {
       });
       return;
     }
-    // TODO: Call real API to change password
-    toast({
-      title: "Password Changed",
-      description: "Your password has been updated.",
-    });
-    setPasswords({ current: "", new: "", confirm: "" });
+
+    try {
+      setIsChangingPassword(true);
+      await authService.changePassword({
+        currentPassword,
+        newPassword,
+        confirmPassword,
+      });
+
+      toast({
+        title: "Password Changed",
+        description: "Your password has been updated.",
+      });
+      setPasswords({ current: "", new: "", confirm: "" });
+    } catch (error) {
+      console.error("Failed to update password:", error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to update password.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   if (isLoading) {
@@ -508,7 +540,11 @@ export default function PatientProfile() {
                     }
                   />
                 </div>
-                <Button onClick={handlePasswordChange} variant="outline">
+                <Button
+                  onClick={handlePasswordChange}
+                  variant="outline"
+                  disabled={isChangingPassword}
+                >
                   <Lock className="w-4 h-4 mr-2" /> Update Password
                 </Button>
               </CardContent>

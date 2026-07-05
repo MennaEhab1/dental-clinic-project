@@ -42,6 +42,7 @@ import DoctorPatients from "./pages/doctor/DoctorPatients";
 import DoctorMedicalRecords from "./pages/doctor/DoctorMedicalRecords";
 import DoctorMessages from "./pages/doctor/DoctorMessages";
 import DoctorSchedulePage from "./pages/doctor/DoctorSchedule";
+import UpdatePassword from "./pages/doctor/UpdatePassword";
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -281,11 +282,21 @@ const App = () => (
                 }
               />
               <Route
+                path="/doctor/updatePassword"
+                element={
+                  <ProtectedRoute>
+                    <RoleRoute role="doctor">
+                      <UpdatePassword />
+                    </RoleRoute>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/doctor/settings"
                 element={
                   <ProtectedRoute>
                     <RoleRoute role="doctor">
-                      <DoctorDashboard />
+                      <UpdatePassword />
                     </RoleRoute>
                   </ProtectedRoute>
                 }

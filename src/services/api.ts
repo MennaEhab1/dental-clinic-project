@@ -660,21 +660,25 @@ async function apiCall<T>(
       .toLowerCase()
       .trim();
 
-    // Auth failure - clear stored token only for auth-related endpoints.
-    // For resource endpoints (admin, doctor, patient pages), a 401 means
-    // "insufficient permissions" — do NOT log the user out.
-    const isAuthEndpoint =
-      endpoint.includes("/api/Account/") || endpoint.includes("/api/auth/");
+    // Only session lifecycle endpoints should force a local logout on 401/403.
+    // Other protected account endpoints such as change-password should keep the
+    // session intact and participate in the normal refresh-and-retry flow.
+    const shouldLogoutOnUnauthorized = [
+      "/api/Account/RefreshToken",
+      "/api/Account/logout",
+      "/api/auth/refresh",
+      "/api/auth/logout",
+    ].some((authPath) => endpoint.includes(authPath));
 
     // For non-auth endpoints, only treat HTTP 401 as unauthorized (not 403,
     // which is a permission/role denial that should not force a logout).
     const isUnauthorizedResponse =
       response.status === 401 ||
-      (response.status === 403 && isAuthEndpoint) ||
+      (response.status === 403 && shouldLogoutOnUnauthorized) ||
       normalizedErrorText.includes("unauthorized") ||
       normalizedErrorText.includes("forbidden");
 
-    if (isUnauthorizedResponse && isAuthEndpoint) {
+    if (isUnauthorizedResponse && shouldLogoutOnUnauthorized) {
       const token = getAuthToken();
       const decodedToken = token ? decodeJWT(token) : null;
       const patientId = token ? extractPatientIdFromToken(token) : null;
@@ -3231,6 +3235,14 @@ export const appointmentService = {
     // Map patient object if it exists in the backend response
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const patientObj = item.patient ? (item.patient as any) : undefined;
+    const patientAvatarFromPayload = resolveBackendAssetUrl(
+      item.patientImage ||
+        item.patientImageUrl ||
+        item.patientAvatar ||
+        item.patientProfileImage ||
+        item.profileImage ||
+        item.imageUrl,
+    );
     const mappedPatient = patientObj
       ? {
           id: String(patientObj.id || ""),
@@ -3238,7 +3250,17 @@ export const appointmentService = {
           firstName: patientObj.firstName || patientObj.first_name || "",
           lastName: patientObj.lastName || patientObj.last_name || "",
           phone: patientObj.phone || patientObj.phoneNumber || "",
-          avatar: patientObj.avatar || patientObj.profileImage || "",
+          avatar:
+            resolveBackendAssetUrl(
+              patientObj.avatar ||
+                patientObj.profileImage ||
+                patientObj.imageUrl ||
+                patientObj.image ||
+                patientObj.photo ||
+                patientObj.profilePicture,
+            ) ||
+            patientAvatarFromPayload ||
+            "",
           role: "patient" as const,
           dateOfBirth: patientObj.dateOfBirth || "",
           gender: patientObj.gender || "other",
@@ -3255,7 +3277,7 @@ export const appointmentService = {
             firstName: patientFirstName,
             lastName: patientLastName,
             phone: "",
-            avatar: "",
+            avatar: patientAvatarFromPayload || "",
             role: "patient" as const,
             dateOfBirth: "",
             gender: "other" as const,

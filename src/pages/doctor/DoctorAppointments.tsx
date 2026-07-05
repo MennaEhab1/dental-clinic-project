@@ -1003,29 +1003,31 @@ export default function DoctorAppointments() {
                   <CardTitle className="text-sm">Add Record</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label>Type</Label>
+                    <Select
+                      value={medicalRecordForm.type}
+                      onValueChange={(value) =>
+                        setMedicalRecordForm((previous) => ({
+                          ...previous,
+                          type: value as MedicalRecordFormState["type"],
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="diagnosis">Diagnosis</SelectItem>
+                        <SelectItem value="treatment">Treatment</SelectItem>
+                        <SelectItem value="note">Note</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   {medicalRecordFieldConfig.map((field) => (
                     <div key={field.key} className="space-y-1.5">
                       <Label>{field.label}</Label>
-                      {field.key === "type" ? (
-                        <Select
-                          value={medicalRecordForm.type}
-                          onValueChange={(value) =>
-                            setMedicalRecordForm((previous) => ({
-                              ...previous,
-                              type: value as MedicalRecordFormState["type"],
-                            }))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="diagnosis">Diagnosis</SelectItem>
-                            <SelectItem value="treatment">Treatment</SelectItem>
-                            <SelectItem value="note">Note</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      ) : field.type === "textarea" ? (
+                      {field.type === "textarea" ? (
                         <Textarea
                           value={medicalRecordForm[field.key]}
                           onChange={(event) =>
@@ -1067,35 +1069,39 @@ export default function DoctorAppointments() {
                   </CardHeader>
                   <CardContent className="space-y-2 text-sm">
                     {detailsLoading ? (
-                      <p className="text-muted-foreground">Loading details...</p>
+                      <p className="text-muted-foreground">
+                        Loading details...
+                      </p>
                     ) : (
                       <>
-                    <div>
-                      <span className="font-medium">Type:</span>{" "}
-                      <span className="capitalize">
-                        {selectedMedicalRecord.type}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="font-medium">Diagnosis:</span>{" "}
-                      {selectedMedicalRecord.diagnosis}
-                    </div>
-                    <div>
-                      <span className="font-medium">Treatment:</span>{" "}
-                      {selectedMedicalRecord.treatment || "N/A"}
-                    </div>
-                    <div>
-                      <span className="font-medium">Notes:</span>{" "}
-                      {selectedMedicalRecord.notes || "N/A"}
-                    </div>
-                    <div>
-                      <span className="font-medium">Tooth Number:</span>{" "}
-                      {selectedMedicalRecord.toothNumber || "N/A"}
-                    </div>
-                    <div>
-                      <span className="font-medium">Date:</span>{" "}
-                      {new Date(selectedMedicalRecord.date).toLocaleString()}
-                    </div>
+                        <div>
+                          <span className="font-medium">Type:</span>{" "}
+                          <span className="capitalize">
+                            {selectedMedicalRecord.type}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-medium">Diagnosis:</span>{" "}
+                          {selectedMedicalRecord.diagnosis}
+                        </div>
+                        <div>
+                          <span className="font-medium">Treatment:</span>{" "}
+                          {selectedMedicalRecord.treatment || "N/A"}
+                        </div>
+                        <div>
+                          <span className="font-medium">Notes:</span>{" "}
+                          {selectedMedicalRecord.notes || "N/A"}
+                        </div>
+                        <div>
+                          <span className="font-medium">Tooth Number:</span>{" "}
+                          {selectedMedicalRecord.toothNumber || "N/A"}
+                        </div>
+                        <div>
+                          <span className="font-medium">Date:</span>{" "}
+                          {new Date(
+                            selectedMedicalRecord.date,
+                          ).toLocaleString()}
+                        </div>
                       </>
                     )}
                   </CardContent>

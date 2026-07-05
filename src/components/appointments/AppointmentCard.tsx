@@ -2,10 +2,12 @@ import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, Clock, User, Stethoscope } from "lucide-react";
 import type { Appointment } from "@/types";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface AppointmentCardProps {
   appointment: Appointment;
   variant?: "default" | "compact";
+  viewerRole?: "doctor" | "patient";
   onView?: () => void;
   onCancel?: () => void;
 }
@@ -25,6 +27,7 @@ const statusLabels: Record<string, string> = {
 export function AppointmentCard({
   appointment,
   variant = "default",
+  viewerRole,
   onView,
   onCancel,
 }: AppointmentCardProps) {
@@ -32,7 +35,41 @@ export function AppointmentCard({
   const patient = appointment.patient;
   const service = appointment.service;
 
+  const resolveAvatarSrc = (value?: string): string | undefined => {
+    const raw = String(value || "").trim();
+    if (!raw) return undefined;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+
+    const baseUrl =
+      import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
+    const normalized = raw.startsWith("/")
+      ? `${baseUrl}${raw}`
+      : `${baseUrl}/${raw}`;
+    try {
+      return encodeURI(normalized);
+    } catch {
+      return normalized;
+    }
+  };
+
   if (variant === "compact") {
+    const counterpart =
+      viewerRole === "doctor"
+        ? patient
+        : viewerRole === "patient"
+          ? doctor
+          : doctor || patient;
+    const counterpartName = counterpart
+      ? `${counterpart.firstName || ""} ${counterpart.lastName || ""}`.trim() ||
+        (viewerRole === "patient" ? "Doctor" : "Patient")
+      : "";
+    const counterpartInitials = counterpartName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("");
+
     return (
       <motion.div
         whileHover={{ x: 4 }}
@@ -49,6 +86,18 @@ export function AppointmentCard({
             {new Date(appointment.date).toLocaleDateString()} at{" "}
             {appointment.time}
           </p>
+          {counterpart && counterpartName && (
+            <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+              <Avatar className="h-6 w-6">
+                <AvatarImage src={resolveAvatarSrc(counterpart.avatar)} />
+                <AvatarFallback>{counterpartInitials || "U"}</AvatarFallback>
+              </Avatar>
+              <span className="truncate">
+                {viewerRole === "patient" ? "Dr. " : ""}
+                {counterpartName}
+              </span>
+            </div>
+          )}
         </div>
         <Badge className={statusStyles[appointment.status]}>
           {statusLabels[appointment.status]}

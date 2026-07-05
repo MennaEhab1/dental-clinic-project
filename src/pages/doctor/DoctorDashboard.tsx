@@ -194,6 +194,7 @@ export default function DoctorDashboard() {
                       key={appointment.id}
                       appointment={appointment}
                       variant="compact"
+                      viewerRole="doctor"
                     />
                   ))}
                 </div>

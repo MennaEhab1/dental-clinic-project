@@ -44,7 +44,9 @@ export default function PatientDashboard() {
     if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
 
     const parsedDateOnly = new Date(dateValue);
-    return Number.isNaN(parsedDateOnly.getTime()) ? 0 : parsedDateOnly.getTime();
+    return Number.isNaN(parsedDateOnly.getTime())
+      ? 0
+      : parsedDateOnly.getTime();
   };
 
   const formatAppointmentDate = (appointment: Appointment): string => {
@@ -161,8 +163,7 @@ export default function PatientDashboard() {
   const lastVisitDoctorSpecialty = lastVisit?.doctor?.specialty
     ? lastVisit.doctor.specialty.replace("-", " ")
     : "General Dentistry";
-  const lastVisitServiceName =
-    lastVisit?.service?.name || "Dental Appointment";
+  const lastVisitServiceName = lastVisit?.service?.name || "Dental Appointment";
   const lastVisitNotes = String(lastVisit?.notes || "").trim();
   const lastVisitInitials = lastVisitDoctorName
     .split(/\s+/)
@@ -266,15 +267,14 @@ export default function PatientDashboard() {
                 <LoadingCard />
               ) : upcomingAppointments.length > 0 ? (
                 <div className="space-y-3">
-                  {upcomingAppointments
-                    .slice(0, 3)
-                    .map((appointment) => (
-                      <AppointmentCard
-                        key={appointment.id}
-                        appointment={appointment}
-                        variant="compact"
-                      />
-                    ))}
+                  {upcomingAppointments.slice(0, 3).map((appointment) => (
+                    <AppointmentCard
+                      key={appointment.id}
+                      appointment={appointment}
+                      variant="compact"
+                      viewerRole="patient"
+                    />
+                  ))}
                 </div>
               ) : (
                 <NoAppointments
@@ -295,7 +295,9 @@ export default function PatientDashboard() {
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={lastVisit.doctor?.avatar} />
-                      <AvatarFallback>{lastVisitInitials || "DR"}</AvatarFallback>
+                      <AvatarFallback>
+                        {lastVisitInitials || "DR"}
+                      </AvatarFallback>
                     </Avatar>
                     <div>
                       <p className="font-medium text-foreground text-sm">
@@ -315,7 +317,9 @@ export default function PatientDashboard() {
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Stethoscope className="w-3.5 h-3.5 text-primary" />
-                      <span className="text-muted-foreground">{lastVisitServiceName}</span>
+                      <span className="text-muted-foreground">
+                        {lastVisitServiceName}
+                      </span>
                     </div>
                   </div>
                   {lastVisitNotes && (

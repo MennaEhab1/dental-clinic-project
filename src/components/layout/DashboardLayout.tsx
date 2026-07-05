@@ -1,11 +1,12 @@
 //DashboardLayout.tsx
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   Calendar,
   Users,
+  KeyRound,
   MessageSquare,
   Settings,
   LogOut,
@@ -26,6 +27,8 @@ import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PublicChatWidget } from "@/components/ai/PublicChatWidget";
+import { notificationService } from "@/services/api";
+import type { BackendNotification } from "@/services/api";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -50,6 +53,7 @@ const doctorNav = [
   { icon: Users, label: "My Patients", href: "/doctor/patients" },
   { icon: FileText, label: "Medical Records", href: "/doctor/records" },
   { icon: MessageSquare, label: "Messages", href: "/doctor/messages" },
+  { icon: KeyRound, label: "Update Password", href: "/doctor/updatePassword" },
 ];
 
 const adminNav = [
@@ -63,9 +67,13 @@ const adminNav = [
 export function DashboardLayout({ children, role }: DashboardLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [cachedPatientAvatar, setCachedPatientAvatar] = useState<string>("");
+  const [notifications, setNotifications] = useState<BackendNotification[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (role !== "patient") return;
@@ -95,6 +103,58 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
     };
   }, [role]);
 
+  useEffect(() => {
+    if (role !== "patient" && role !== "doctor") return;
+
+    let cancelled = false;
+
+    const loadNotifications = async () => {
+      setIsLoadingNotifications(true);
+      try {
+        const res = await notificationService.getAll();
+        if (!cancelled && res.success) {
+          setNotifications(res.data || []);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingNotifications(false);
+        }
+      }
+    };
+
+    loadNotifications();
+    const interval = window.setInterval(loadNotifications, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [role]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        notificationsRef.current &&
+        !notificationsRef.current.contains(event.target as Node)
+      ) {
+        setIsNotificationsOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsNotificationsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
   const avatarSrc = useMemo(() => {
     const raw = String(cachedPatientAvatar || user?.avatar || "").trim();
     if (!raw) return "";
@@ -114,6 +174,121 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
 
   const navItems =
     role === "patient" ? patientNav : role === "doctor" ? doctorNav : adminNav;
+
+  const unreadCount = notifications.filter((item) => !item.isRead).length;
+
+  const formatNotificationTime = (value: string) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "Just now";
+
+    const diffMs = Date.now() - parsed.getTime();
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diffMs < minute) return "Just now";
+    if (diffMs < hour) return `${Math.floor(diffMs / minute)}m ago`;
+    if (diffMs < day) return `${Math.floor(diffMs / hour)}h ago`;
+    return `${Math.floor(diffMs / day)}d ago`;
+  };
+
+  const handleMarkAsRead = async (item: BackendNotification) => {
+    if (item.isRead) return;
+
+    setNotifications((prev) =>
+      prev.map((entry) =>
+        entry.id === item.id ? { ...entry, isRead: true } : entry,
+      ),
+    );
+
+    const result = await notificationService.markAsRead(item.id);
+    if (!result.success) {
+      setNotifications((prev) =>
+        prev.map((entry) =>
+          entry.id === item.id ? { ...entry, isRead: false } : entry,
+        ),
+      );
+    }
+  };
+
+  const renderNotificationBell = () => {
+    if (role !== "patient" && role !== "doctor") return null;
+
+    return (
+      <div className="relative" ref={notificationsRef}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative"
+          onClick={() => setIsNotificationsOpen((prev) => !prev)}
+          aria-label="Open notifications"
+        >
+          <Bell className="w-5 h-5" />
+          {unreadCount > 0 && (
+            <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-destructive text-[10px] leading-4 text-destructive-foreground text-center">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
+        </Button>
+
+        {isNotificationsOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.2 }}
+            className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg z-50"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <p className="font-medium text-sm">Notifications</p>
+              <span className="text-xs text-muted-foreground">
+                {unreadCount} unread
+              </span>
+            </div>
+
+            <div className="max-h-80 overflow-y-auto">
+              {isLoadingNotifications ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+                  Loading notifications...
+                </p>
+              ) : notifications.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+                  No notifications yet.
+                </p>
+              ) : (
+                notifications.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      void handleMarkAsRead(item);
+                    }}
+                    className={`w-full text-left px-4 py-3 border-b border-border/60 hover:bg-muted/60 transition-colors ${
+                      item.isRead ? "" : "bg-primary/5"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {!item.isRead && (
+                        <span className="mt-1.5 h-2 w-2 rounded-full bg-primary shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-foreground break-words">
+                          {item.message}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatNotificationTime(item.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </motion.div>
+        )}
+      </div>
+    );
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -143,10 +318,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
         </Link>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-          </Button>
+          {renderNotificationBell()}
         </div>
       </header>
 
@@ -262,10 +434,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-            </Button>
+            {renderNotificationBell()}
             <Avatar className="h-9 w-9">
               <AvatarImage src={avatarSrc} />
               <AvatarFallback>

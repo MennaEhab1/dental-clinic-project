@@ -94,7 +94,7 @@ export function AppointmentDetailsDrawer({
               <Calendar className="w-4 h-4 text-primary" />
               Date & Time
             </h4>
-            <div className="p-4 rounded-xl bg-muted/50">
+            <div className="p-4 rounded-xl bg-muted/50 space-y-2">
               <p className="font-medium text-foreground">
                 {new Date(appointment.date).toLocaleDateString("en-US", {
                   weekday: "long",
@@ -103,8 +103,30 @@ export function AppointmentDetailsDrawer({
                   day: "numeric",
                 })}
               </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {appointment.time} • {appointment.duration} minutes
+              <p className="text-sm text-muted-foreground">
+                {appointment.startTime || appointment.time} • {appointment.duration} minutes
+              </p>
+            </div>
+          </div>
+
+          {/* Payment Info */}
+          <div>
+            <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-primary" />
+              Payment
+            </h4>
+            <div className="p-4 rounded-xl bg-muted/50 space-y-2">
+              <p className="text-sm text-muted-foreground">
+                Amount: <span className="text-foreground font-medium">
+                  {typeof appointment.amount === "number"
+                    ? `EGP ${appointment.amount}`
+                    : "Not set"}
+                </span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Method: <span className="text-foreground font-medium">
+                  {appointment.paymentMethod || "Pending"}
+                </span>
               </p>
             </div>
           </div>

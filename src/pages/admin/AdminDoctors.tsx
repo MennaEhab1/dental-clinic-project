@@ -8,8 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Eye } from "lucide-react";
-import { DoctorInfoDialog } from "./DoctorInfoDialog";
+import { DoctorInfoDialog } from "@/components/admin/DoctorInfoDialog";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +24,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Search,
   Plus,
@@ -44,13 +42,9 @@ interface DoctorFormData {
   fullName: string;
   email: string;
   password?: string;
-  phone?: string;
   specialityID: number;
-  experience?: number;
+  workingHours?: number;
   consultationFee?: number;
-  bio?: string;
-  gender: string;
-  address: string;
 }
 
 export default function AdminDoctors() {
@@ -69,13 +63,9 @@ export default function AdminDoctors() {
   const [formData, setFormData] = useState<DoctorFormData>({
     fullName: "",
     email: "",
-    phone: "",
     specialityID: 0,
-    experience: 0,
+    workingHours: 0,
     consultationFee: 0,
-    bio: "",
-    gender: "",
-    address: "",
   });
 
   // Fetch doctors on mount
@@ -131,9 +121,41 @@ export default function AdminDoctors() {
     return matchesSearch && matchesSpecialty;
   });
 
-  const handleOpenDialog = (doctor?: Doctor) => {
+  const buildFormDataFromDoctor = (
+    doctor: Doctor & {
+      gender?: string;
+      address?: string;
+      specialization?: string;
+      fullName?: string;
+      specialityName?: string;
+    },
+  ): DoctorFormData => {
     const defaultId = specializations[0]?.id ?? 0;
-    // Warn if specializations haven't loaded yet (prevents specialityID: 0 being sent)
+    const matchedSpec = specializations.find(
+      (s) =>
+        s.name.toLowerCase().replace(/\s+/g, "") ===
+        String(
+          doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
+        )
+          .toLowerCase()
+          .replace(/[-\s]/g, ""),
+    );
+    const fullName =
+      doctor.fullName?.trim() ||
+      `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
+
+    return {
+      fullName,
+      email: doctor.email,
+      password: "",
+      specialityID: matchedSpec?.id ?? defaultId,
+      workingHours: doctor.workingHours ?? doctor.experience ?? 0,
+      consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
+    };
+  };
+
+  const handleOpenDialog = async (doctor?: Doctor) => {
+    const defaultId = specializations[0]?.id ?? 0;
     if (specializations.length === 0) {
       toast({
         title: "Please wait",
@@ -143,43 +165,45 @@ export default function AdminDoctors() {
       });
       return;
     }
+
     if (doctor) {
-      // Find the matching specialization ID by name
-      const matchedSpec = specializations.find(
-        (s) =>
-          s.name.toLowerCase().replace(/\s+/g, "") ===
-          String(doctor.specialty).toLowerCase().replace(/[-\s]/g, ""),
-      );
-      setEditingDoctor(doctor);
-      setFormData({
-        fullName: `${doctor.firstName} ${doctor.lastName}`.trim(),
-        email: doctor.email,
-        password: "",
-        phone: doctor.phone || "",
-        specialityID: matchedSpec?.id ?? defaultId,
-        experience: doctor.experience || 0,
-        consultationFee: doctor.consultationFee || 0,
-        bio: doctor.bio || "",
-        gender: (doctor as Doctor & { gender?: string }).gender || "",
-        address: (doctor as Doctor & { address?: string }).address || "",
-      });
+      try {
+        const response = await adminDoctorService.getById(doctor.id);
+        const doctorDetails = response.success
+          ? ((response.data as Doctor & {
+              gender?: string;
+              address?: string;
+              specialization?: string;
+              specialityName?: string;
+              fullName?: string;
+            }) ?? doctor)
+          : doctor;
+
+        setEditingDoctor(doctorDetails as Doctor);
+        setFormData(buildFormDataFromDoctor(doctorDetails));
+      } catch {
+        toast({
+          title: "Error",
+          description: "Failed to load doctor details",
+          variant: "destructive",
+        });
+        return;
+      }
     } else {
       setEditingDoctor(null);
       setFormData({
         fullName: "",
         email: "",
         password: "",
-        phone: "",
         specialityID: defaultId,
-        experience: 0,
+        workingHours: 0,
         consultationFee: 0,
-        bio: "",
-        gender: "",
-        address: "",
       });
     }
+
     setDialogOpen(true);
   };
+
   const handleViewDoctor = async (doctor: Doctor) => {
     try {
       const response = await adminDoctorService.getById(doctor.id);
@@ -268,18 +292,21 @@ export default function AdminDoctors() {
       email: formData.email.trim(),
       password,
       salary: Math.max(0, Number(formData.consultationFee ?? 0)),
-      workingHours: Math.max(0, Number(formData.experience ?? 0)),
+      workingHours: Math.max(0, Number(formData.workingHours ?? 0)),
       hiringDate: new Date().toISOString(),
       specialityID: formData.specialityID,
-      gender: formData.gender,
-      address: formData.address.trim(),
     };
-    const serviceData = createPayload;
+    const updatePayload = {
+      fullName: formData.fullName.trim(),
+      salary: Math.max(0, Number(formData.consultationFee ?? 0)),
+      workingHours: Math.max(0, Number(formData.workingHours ?? 0)),
+      specialityID: formData.specialityID,
+    };
+    const serviceData = editingDoctor ? updatePayload : createPayload;
 
     try {
       setIsSubmitting(true);
       if (editingDoctor) {
-        // Update existing doctor
         const response = await adminDoctorService.update(
           editingDoctor.id,
           serviceData,
@@ -287,25 +314,45 @@ export default function AdminDoctors() {
         if (!response.success) {
           throw new Error(response.message || "Failed to update doctor");
         }
-        // Optimistically update local state so the new name/values show immediately
+
+        const updatedDoctor = response.data as Doctor & {
+          gender?: string;
+          address?: string;
+          specialization?: string;
+          fullName?: string;
+        };
         const nameParts = formData.fullName.trim().split(/\s+/);
         setDoctors((prev) =>
           prev.map((d) =>
             d.id === editingDoctor.id
               ? {
                   ...d,
-                  firstName: nameParts[0] || d.firstName,
-                  lastName: nameParts.slice(1).join(" ") || d.lastName,
+                  firstName: updatedDoctor.firstName || nameParts[0] || d.firstName,
+                  lastName:
+                    updatedDoctor.lastName ||
+                    nameParts.slice(1).join(" ") ||
+                    d.lastName,
                   consultationFee:
-                    formData.consultationFee ?? d.consultationFee,
-                  experience: formData.experience ?? d.experience,
+                    updatedDoctor.consultationFee ??
+                    formData.consultationFee ??
+                    d.consultationFee,
+                  experience:
+                    updatedDoctor.workingHours ??
+                    updatedDoctor.experience ??
+                    formData.workingHours ??
+                    d.experience,
+                  specialty: updatedDoctor.specialty || d.specialty,
+                  email: updatedDoctor.email || d.email,
                 }
               : d,
           ),
         );
+        const refreshedDoctor = await adminDoctorService.getById(editingDoctor.id);
+        if (refreshedDoctor.success && refreshedDoctor.data) {
+          setSelectedDoctor(refreshedDoctor.data);
+        }
         toast({ title: "Success", description: "Doctor updated successfully" });
       } else {
-        // Create new doctor
         const response = await adminDoctorService.create(serviceData);
         if (!response.success) {
           throw new Error(response.message || "Failed to create doctor");
@@ -446,17 +493,7 @@ export default function AdminDoctors() {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input
-                    placeholder="+1 555-0000"
-                    value={formData.phone}
-                    onChange={(e) =>
-                      setFormData({ ...formData, phone: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Specialty</Label>
+                  <Label>Specialization</Label>
                   <Select
                     value={String(formData.specialityID)}
                     onValueChange={(val) =>
@@ -464,7 +501,7 @@ export default function AdminDoctors() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select specialty" />
+                      <SelectValue placeholder="Select specialization" />
                     </SelectTrigger>
                     <SelectContent>
                       {specializations.map((s) => (
@@ -477,15 +514,15 @@ export default function AdminDoctors() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Experience (years)</Label>
+                    <Label>Working Hours</Label>
                     <Input
                       type="number"
-                      placeholder="10"
-                      value={formData.experience || ""}
+                      placeholder="8"
+                      value={formData.workingHours || ""}
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          experience: parseInt(e.target.value) || 0,
+                          workingHours: parseInt(e.target.value) || 0,
                         })
                       }
                     />
@@ -504,45 +541,6 @@ export default function AdminDoctors() {
                       }
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Gender *</Label>
-                    <Select
-                      value={formData.gender}
-                      onValueChange={(val) =>
-                        setFormData({ ...formData, gender: val })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select gender" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Male">Male</SelectItem>
-                        <SelectItem value="Female">Female</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Address *</Label>
-                    <Input
-                      placeholder="123 Main St"
-                      value={formData.address}
-                      onChange={(e) =>
-                        setFormData({ ...formData, address: e.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Bio</Label>
-                  <Textarea
-                    placeholder="Doctor's biography..."
-                    value={formData.bio || ""}
-                    onChange={(e) =>
-                      setFormData({ ...formData, bio: e.target.value })
-                    }
-                  />
                 </div>
                 <div className="flex gap-2 pt-2">
                   <Button
@@ -591,7 +589,6 @@ export default function AdminDoctors() {
             </SelectContent>
           </Select>
         </div>
-
         {isLoading ? (
           <LoadingCard />
         ) : filteredDoctors.length === 0 ? (
@@ -609,7 +606,10 @@ export default function AdminDoctors() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
               >
-                <Card className="hover:shadow-card transition-all">
+                <Card
+                  className="hover:shadow-card transition-all cursor-pointer"
+                  onClick={() => void handleViewDoctor(doctor)}
+                >
                   <CardContent className="p-5">
                     <div className="flex items-start gap-4">
                       <Avatar className="h-14 w-14">
@@ -651,14 +651,6 @@ export default function AdminDoctors() {
                               {doctor.specialty.replace("-", " ")}
                             </p>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => handleViewDoctor(doctor)}
-                          >
-                            <Eye className="w-3.5 h-3.5 text-green-600" />
-                          </Button>
                           <div className="flex gap-1">
                             <Button
                               variant="ghost"
@@ -669,7 +661,10 @@ export default function AdminDoctors() {
                                   ? "Deactivate"
                                   : "Activate"
                               }
-                              onClick={() => handleToggleStatus(doctor)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleToggleStatus(doctor);
+                              }}
                             >
                               {doctor.isActive !== false ? (
                                 <ToggleRight className="w-4 h-4 text-green-500" />
@@ -681,18 +676,24 @@ export default function AdminDoctors() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => handleOpenDialog(doctor)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleOpenDialog(doctor);
+                              }}
                             >
                               <Edit className="w-3.5 h-3.5" />
                             </Button>
-                            {/* <Button
+                            <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleDelete(doctor.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDelete(doctor.id);
+                              }}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
-                            </Button> */}
+                            </Button>
                           </div>
                         </div>
                         <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">

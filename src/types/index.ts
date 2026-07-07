@@ -37,10 +37,16 @@ export interface Patient extends User {
 export interface Doctor extends User {
   role: "doctor";
   specialty: DentalSpecialty;
+  specialization?: string;
+  specialityName?: string;
   qualifications: string[];
   experience: number;
+  workingHours?: number;
+  salary?: number;
   bio: string;
   consultationFee: number;
+  gender?: string;
+  address?: string;
   averageRating?: number;
   totalReviews?: number;
   rating: number;
@@ -87,7 +93,10 @@ export interface Appointment {
   service?: Service;
   date: string;
   time: string;
+  startTime?: string;
   duration: number;
+  amount?: number;
+  paymentMethod?: string | null;
   status: AppointmentStatus;
   notes?: string;
   prescription?: Prescription;

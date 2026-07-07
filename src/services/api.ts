@@ -3287,6 +3287,23 @@ export const appointmentService = {
           }
         : undefined;
 
+    const paymentMethod =
+      item.paymentMethod ||
+      item.payment_method ||
+      item.PaymentMethod ||
+      item.paymentMethodName ||
+      item.payment_mode ||
+      item.paymentType ||
+      fallback?.paymentMethod ||
+      "";
+
+    const rawAmount =
+      item.amount ?? item.price ?? item.totalAmount ?? item.fee ?? fallback?.amount;
+    const amount =
+      typeof rawAmount === "number"
+        ? rawAmount
+        : Number(rawAmount ?? 0);
+
     return {
       id: String(item.appointmentId || item.id || fallback?.id || ""),
       patientId: String(
@@ -3306,7 +3323,10 @@ export const appointmentService = {
       service: mappedService,
       date: date || fallback?.date || formatDateTimeInEgypt(new Date()).date,
       time: time || fallback?.time || "00:00",
+      startTime: rawStartTime || fallback?.startTime || time,
       duration: item.duration || fallback?.duration || 30,
+      amount,
+      paymentMethod: paymentMethod || null,
       status: normalizeAppointmentStatus(item.status || fallback?.status),
       notes: item.notes || item.description || fallback?.notes || "",
       createdAt:
@@ -3940,13 +3960,25 @@ export const adminDoctorService = {
       specialty: normalizeSpecialty(
         doc.specialty ?? doc.specializationName ?? doc.specialityName,
       ),
-      qualifications: doc.qualifications ?? [],
-      // yearsOfExperience is the canonical backend field; fall back to workingHours
+      specialization:
+        doc.specialization ??
+        doc.specializationName ??
+        doc.specialityName ??
+        doc.specialty ??
+        undefined,
+      specialityName:
+        doc.specialityName ?? doc.specializationName ?? doc.specialty ?? undefined,
+      salary: doc.salary ?? doc.consultationFee ?? 0,
+      consultationFee: doc.consultationFee ?? doc.salary ?? 0,
+      workingHours: doc.workingHours ?? doc.experience ?? 0,
       experience:
         doc.yearsOfExperience ?? doc.experience ?? doc.workingHours ?? 0,
+      hiringDate: doc.hiringDate ?? doc.createdAt ?? undefined,
+      userId: doc.userId ?? undefined,
+      gender: doc.gender ?? doc.sex ?? undefined,
+      address: doc.address ?? doc.location ?? undefined,
+      qualifications: doc.qualifications ?? [],
       bio: doc.bio ?? "",
-      // consultationFee is returned directly; salary is the backend storage name
-      consultationFee: doc.consultationFee ?? doc.salary ?? 0,
       averageRating: doc.averageRating ?? doc.rating ?? 0,
       totalReviews: doc.totalReviews ?? doc.reviewCount ?? 0,
       rating: doc.averageRating ?? doc.rating ?? 0,
@@ -4270,17 +4302,9 @@ export const adminAppointmentService = {
   /**
    * Create appointment (admin)
    * POST /api/admin/appointments
-   * Uses CreateAppointmentByAdminDTO: doctorID, patientID, date, startTime, amount, paymentMethod
+   * Uses BookAppointmentDto: doctorId, patientId, date, startTime, amount, paymentMethod
    */
-  async create(payload: {
-    doctorID: number;
-    patientID: number;
-    date: string; // ISO date-time
-    startTime: string; // "HH:mm:ss"
-    amount: number;
-    paymentMethod: "Cash" | "Visa";
-    paymentStatus?: string;
-  }): Promise<ApiResponse<Appointment>> {
+  async create(payload: BookAppointmentDto): Promise<ApiResponse<Appointment>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const res = await apiCall<any>("/api/admin/appointments", {
       method: "POST",

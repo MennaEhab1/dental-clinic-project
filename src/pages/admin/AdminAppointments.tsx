@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Search, Filter, X, Check, Plus, Loader2 } from "lucide-react";
 import { adminAppointmentService, doctorService } from "@/services/api";
 import type { Appointment, AppointmentStatus, Doctor, Patient } from "@/types";
+import type { BookAppointmentDto } from "@/types/swagger";
 import { toast } from "@/hooks/use-toast";
 
 export default function AdminAppointments() {
@@ -44,8 +45,8 @@ export default function AdminAppointments() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [createForm, setCreateForm] = useState({
-    doctorID: "",
-    patientID: "",
+    doctorId: "",
+    patientId: "",
     date: "",
     startTime: "",
     amount: "0",
@@ -116,12 +117,51 @@ export default function AdminAppointments() {
 
   const filtered = appointments.filter((a) => {
     const matchesSearch =
-      `${a.patient?.firstName} ${a.patient?.lastName} ${a.doctor?.firstName} ${a.doctor?.lastName} ${a.service?.name}`
+      `${a.patient?.firstName || ""} ${a.patient?.lastName || ""} ${a.doctor?.firstName || ""} ${a.doctor?.lastName || ""} ${a.service?.name || ""}`
         .toLowerCase()
         .includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || a.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const getPatientDisplayName = (apt: Appointment) => {
+    const firstName = apt.patient?.firstName?.trim() || "";
+    const lastName = apt.patient?.lastName?.trim() || "";
+    const fullName = `${firstName} ${lastName}`.trim();
+    return (
+      fullName ||
+      apt.patient?.email ||
+      apt.patient?.id ||
+      `Patient #${apt.patientId || "—"}`
+    );
+  };
+
+  const getPatientAvatarFallback = (apt: Appointment) => {
+    const name = getPatientDisplayName(apt);
+    return name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0].toUpperCase())
+      .slice(0, 2)
+      .join("") || "P";
+  };
+
+  const getDoctorDisplayName = (apt: Appointment) => {
+    const doctorFromList = doctors.find((doc) => doc.id === apt.doctorId);
+    const firstName = apt.doctor?.firstName?.trim() || "";
+    const lastName = apt.doctor?.lastName?.trim() || "";
+    const fullName = `${firstName} ${lastName}`.trim();
+    const isEmailName = Boolean(firstName && firstName.includes("@"));
+
+    if (doctorFromList) {
+      const listName = `${doctorFromList.firstName || ""} ${doctorFromList.lastName || ""}`.trim();
+      if (listName) return `Dr. ${listName}`;
+    }
+
+    if (fullName && !isEmailName) return `Dr. ${fullName}`;
+
+    return apt.doctorId ? `Doctor #${apt.doctorId}` : "Doctor";
+  };
 
   const handleStatusChange = async (
     appointmentId: string,
@@ -151,8 +191,8 @@ export default function AdminAppointments() {
 
   const validateCreateForm = () => {
     const errs: Record<string, string> = {};
-    if (!createForm.doctorID) errs.doctorID = "Doctor is required";
-    if (!createForm.patientID) errs.patientID = "Patient is required";
+    if (!createForm.doctorId) errs.doctorId = "Doctor is required";
+    if (!createForm.patientId) errs.patientId = "Patient is required";
     if (!createForm.date) errs.date = "Date is required";
     if (!createForm.startTime) errs.startTime = "Start time is required";
     if (isNaN(Number(createForm.amount)) || Number(createForm.amount) < 0)
@@ -166,9 +206,9 @@ export default function AdminAppointments() {
     if (!validateCreateForm()) return;
     setIsCreating(true);
     try {
-      const doctorIDNum = Number(createForm.doctorID);
-      const patientIDNum = Number(createForm.patientID);
-      if (isNaN(doctorIDNum) || isNaN(patientIDNum)) {
+      const doctorIdNum = Number(createForm.doctorId);
+      const patientIdNum = Number(createForm.patientId);
+      if (isNaN(doctorIdNum) || isNaN(patientIdNum)) {
         throw new Error(
           "Invalid doctor or patient ID — please re-select from the dropdowns",
         );
@@ -178,15 +218,16 @@ export default function AdminAppointments() {
       // input[type="time"] returns "HH:mm" — pad to "HH:mm:ss" for date-span
       const [hh, mm] = createForm.startTime.split(":");
       const startTime = `${hh.padStart(2, "0")}:${(mm ?? "00").padStart(2, "0")}:00`;
-      const response = await adminAppointmentService.create({
-        doctorID: doctorIDNum,
-        patientID: patientIDNum,
-        date: dateIso,
-        startTime,
-        amount: Math.round(Number(createForm.amount)), // backend expects integer
-        paymentMethod: createForm.paymentMethod,
-        paymentStatus: "Unpaid",
-      });
+      const payload = {
+  doctorID: doctorIdNum,
+  patientID: patientIdNum,
+  date: dateIso,
+  startTime,
+  amount: Math.round(Number(createForm.amount)),
+  paymentMethod: createForm.paymentMethod,
+  paymentStatus: "Paid",
+};
+      const response = await adminAppointmentService.create(payload);
       setAppointments((prev) => [response.data, ...prev]);
       toast({
         title: "Success",
@@ -194,8 +235,8 @@ export default function AdminAppointments() {
       });
       setCreateOpen(false);
       setCreateForm({
-        doctorID: "",
-        patientID: "",
+        doctorId: "",
+        patientId: "",
         date: "",
         startTime: "",
         amount: "0",
@@ -330,23 +371,16 @@ export default function AdminAppointments() {
                           <Avatar className="h-8 w-8">
                             <AvatarImage src={apt.patient?.avatar} />
                             <AvatarFallback className="text-xs">
-                              {apt.patient?.firstName[0]}
-                              {apt.patient?.lastName[0]}
+                              {getPatientAvatarFallback(apt)}
                             </AvatarFallback>
                           </Avatar>
                           <span className="text-foreground font-medium">
-                            {apt.patient?.firstName} {apt.patient?.lastName}
+                            {getPatientDisplayName(apt)}
                           </span>
                         </div>
                       </td>
                       <td className="py-3 text-muted-foreground">
-                        {apt.doctor
-                          ? `Dr. ${apt.doctor.firstName} ${apt.doctor.lastName}`
-                              .trim()
-                              .replace(/Dr\.\s*$/, "Dr. —")
-                          : apt.doctorId
-                            ? `Doctor #${apt.doctorId}`
-                            : "—"}
+                        {getDoctorDisplayName(apt)}
                       </td>
                       <td className="py-3 text-muted-foreground hidden md:table-cell">
                         {apt.service?.name}
@@ -431,14 +465,14 @@ export default function AdminAppointments() {
             <div>
               <Label htmlFor="ca-doctor">Doctor</Label>
               <Select
-                value={createForm.doctorID}
+                value={createForm.doctorId}
                 onValueChange={(v) =>
-                  setCreateForm((p) => ({ ...p, doctorID: v }))
+                  setCreateForm((p) => ({ ...p, doctorId: v }))
                 }
               >
                 <SelectTrigger
                   id="ca-doctor"
-                  className={`mt-1 ${createErrors.doctorID ? "border-destructive" : ""}`}
+                  className={`mt-1 ${createErrors.doctorId ? "border-destructive" : ""}`}
                 >
                   <SelectValue placeholder="Select doctor" />
                 </SelectTrigger>
@@ -450,9 +484,9 @@ export default function AdminAppointments() {
                   ))}
                 </SelectContent>
               </Select>
-              {createErrors.doctorID && (
+              {createErrors.doctorId && (
                 <p className="text-xs text-destructive mt-1">
-                  {createErrors.doctorID}
+                  {createErrors.doctorId}
                 </p>
               )}
             </div>
@@ -462,14 +496,14 @@ export default function AdminAppointments() {
               <Label htmlFor="ca-patient">Patient</Label>
               {patients.length > 0 ? (
                 <Select
-                  value={createForm.patientID}
+                  value={createForm.patientId}
                   onValueChange={(v) =>
-                    setCreateForm((p) => ({ ...p, patientID: v }))
+                    setCreateForm((p) => ({ ...p, patientId: v }))
                   }
                 >
                   <SelectTrigger
                     id="ca-patient"
-                    className={`mt-1 ${createErrors.patientID ? "border-destructive" : ""}`}
+                    className={`mt-1 ${createErrors.patientId ? "border-destructive" : ""}`}
                   >
                     <SelectValue placeholder="Select patient" />
                   </SelectTrigger>
@@ -488,16 +522,16 @@ export default function AdminAppointments() {
                   type="number"
                   min="1"
                   placeholder="Enter patient ID"
-                  value={createForm.patientID}
+                  value={createForm.patientId}
                   onChange={(e) =>
-                    setCreateForm((p) => ({ ...p, patientID: e.target.value }))
+                    setCreateForm((p) => ({ ...p, patientId: e.target.value }))
                   }
-                  className={`mt-1 ${createErrors.patientID ? "border-destructive" : ""}`}
+                  className={`mt-1 ${createErrors.patientId ? "border-destructive" : ""}`}
                 />
               )}
-              {createErrors.patientID && (
+              {createErrors.patientId && (
                 <p className="text-xs text-destructive mt-1">
-                  {createErrors.patientID}
+                  {createErrors.patientId}
                 </p>
               )}
             </div>

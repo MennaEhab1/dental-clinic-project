@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, User, Stethoscope } from "lucide-react";
+import { Calendar, Clock, DollarSign, User, Stethoscope } from "lucide-react";
 import type { Appointment } from "@/types";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -34,6 +34,15 @@ export function AppointmentCard({
   const doctor = appointment.doctor;
   const patient = appointment.patient;
   const service = appointment.service;
+  const displayTime = appointment.startTime
+    ? appointment.startTime.substring(0, 5)
+    : appointment.time;
+  const paymentLabel = appointment.paymentMethod
+    ? appointment.paymentMethod
+    : "Payment pending";
+  const amountLabel = typeof appointment.amount === "number"
+    ? `EGP ${appointment.amount}`
+    : "Amount not set";
 
   const resolveAvatarSrc = (value?: string): string | undefined => {
     const raw = String(value || "").trim();
@@ -83,8 +92,10 @@ export function AppointmentCard({
             {service?.name || "Dental Appointment"}
           </p>
           <p className="text-sm text-muted-foreground">
-            {new Date(appointment.date).toLocaleDateString()} at{" "}
-            {appointment.time}
+            {new Date(appointment.date).toLocaleDateString()} at {displayTime}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {amountLabel} • {paymentLabel}
           </p>
           {counterpart && counterpartName && (
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
@@ -143,7 +154,13 @@ export function AppointmentCard({
         <div className="flex items-center gap-3 text-sm">
           <Clock className="w-4 h-4 text-primary" />
           <span className="text-muted-foreground">
-            {appointment.time} ({appointment.duration} minutes)
+            {displayTime} ({appointment.duration} minutes)
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-sm">
+          <DollarSign className="w-4 h-4 text-primary" />
+          <span className="text-muted-foreground">
+            {amountLabel} • {paymentLabel}
           </span>
         </div>
         {doctor && (

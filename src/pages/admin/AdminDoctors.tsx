@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Eye } from "lucide-react";
+import { DoctorInfoDialog } from "src/pages/admin/DoctorInfoDialog.tsx";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +64,8 @@ export default function AdminDoctors() {
   const [specialtyFilter, setSpecialtyFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
+  const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
+const [infoOpen, setInfoOpen] = useState(false);
   const [formData, setFormData] = useState<DoctorFormData>({
     fullName: "",
     email: "",
@@ -176,7 +180,22 @@ export default function AdminDoctors() {
     }
     setDialogOpen(true);
   };
+const handleViewDoctor = async (doctor: Doctor) => {
+  try {
+    const response = await adminDoctorService.getById(doctor.id);
 
+    if (response.success) {
+      setSelectedDoctor(response.data);
+      setInfoOpen(true);
+    }
+  } catch {
+    toast({
+      title: "Error",
+      description: "Failed to load doctor information",
+      variant: "destructive",
+    });
+  }
+};
   const handleCloseDialog = () => {
     setDialogOpen(false);
     setEditingDoctor(null);
@@ -632,6 +651,14 @@ export default function AdminDoctors() {
                               {doctor.specialty.replace("-", " ")}
                             </p>
                           </div>
+                          <Button
+  variant="ghost"
+  size="icon"
+  className="h-8 w-8"
+  onClick={() => handleViewDoctor(doctor)}
+>
+  <Eye className="w-3.5 h-3.5 text-green-600" />
+</Button>
                           <div className="flex gap-1">
                             <Button
                               variant="ghost"
@@ -702,6 +729,13 @@ export default function AdminDoctors() {
           </div>
         )}
       </div>
+      {selectedDoctor && (
+  <DoctorInfoDialog
+    doctor={selectedDoctor}
+    open={infoOpen}
+    onOpenChange={setInfoOpen}
+  />
+)}
     </DashboardLayout>
   );
 }

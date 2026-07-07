@@ -62,7 +62,6 @@ const stats = [
   { value: "15+", label: "Years Experience" },
   { value: "50K+", label: "Happy Patients" },
   { value: "12", label: "Expert Dentists" },
-  { value: "98%", label: "Success Rate" },
 ];
 
 const testimonials = [
@@ -217,26 +216,9 @@ export default function LandingPage() {
                 className="absolute -top-4 -right-4 bg-card p-4 rounded-2xl shadow-card border border-border"
               >
                 <div className="flex items-center gap-2">
-                  <div className="flex -space-x-2">
-                    {[1, 2, 3].map((i) => (
-                      <img
-                        key={i}
-                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=patient${i}`}
-                        alt=""
-                        className="w-8 h-8 rounded-full border-2 border-card"
-                      />
-                    ))}
-                  </div>
-                  <div className="ml-2">
-                    <div className="flex items-center gap-1">
-                      {[1, 2, 3, 4, 5].map((i) => (
-                        <Star
-                          key={i}
-                          className="w-3 h-3 text-warning fill-warning"
-                        />
-                      ))}
-                    </div>
-                    <p className="text-xs text-muted-foreground">4.9 Rating</p>
+                  <div className="flex -space-x-2 font-bold">
+                    <Sparkles className="text-cyan-400" />{" "}
+                    <span className="pl-5 ">Free Ai Assistant</span>
                   </div>
                 </div>
               </motion.div>

@@ -55,14 +55,16 @@ export function Header() {
         <div className="flex items-center justify-between h-16 md:h-20">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
+            {/* <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
               <span className="text-xl font-bold text-primary-foreground">
                 D
               </span>
             </div>
             <span className="text-xl font-display font-bold text-foreground">
               Dental<span className="gradient-text">Care</span>
-            </span>
+            </span> */}
+            {/* <img src="/public/Logo.png" alt="" className="h-16 w-auto" /> */}
+            <img src="/public/LogoLunare.png" alt="" className="h-16 w-auto" />
           </Link>
 
           {/* Desktop Navigation */}

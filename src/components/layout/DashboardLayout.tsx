@@ -3,6 +3,10 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
+  // ... باقي الـ imports
+  Stethoscope,
+} from "lucide-react";
+import {
   LayoutDashboard,
   Calendar,
   Users,
@@ -56,13 +60,22 @@ const doctorNav = [
   { icon: KeyRound, label: "Update Password", href: "/doctor/updatePassword" },
 ];
 
+// const adminNav = [
+//   { icon: LayoutDashboard, label: "Dashboard", href: "/admin/dashboard" },
+//   { icon: Users, label: "Doctors", href: "/admin/doctors" },
+//   { icon: Users, label: "Patients", href: "/admin/patients" },
+//   { icon: Calendar, label: "Appointments", href: "/admin/appointments" },
+//   { icon: Pill, label: "Pharmacy", href: "/admin/pharmacy" },
+// ];
 const adminNav = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/admin/dashboard" },
   { icon: Users, label: "Doctors", href: "/admin/doctors" },
   { icon: Users, label: "Patients", href: "/admin/patients" },
   { icon: Calendar, label: "Appointments", href: "/admin/appointments" },
   { icon: Pill, label: "Pharmacy", href: "/admin/pharmacy" },
+  { icon: Stethoscope, label: "Specialities", href: "/admin/specialities" },
 ];
+
 
 export function DashboardLayout({ children, role }: DashboardLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);

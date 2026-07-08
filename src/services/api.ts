@@ -3973,8 +3973,8 @@ export const adminDoctorService = {
       workingHours: doc.workingHours ?? doc.experience ?? 0,
       experience:
         doc.yearsOfExperience ?? doc.experience ?? doc.workingHours ?? 0,
-      hiringDate: doc.hiringDate ?? doc.createdAt ?? undefined,
-      userId: doc.userId ?? undefined,
+      // hiringDate: doc.hiringDate ?? doc.createdAt ?? undefined,
+      // userId: doc.userId ?? undefined,
       gender: doc.gender ?? doc.sex ?? undefined,
       address: doc.address ?? doc.location ?? undefined,
       qualifications: doc.qualifications ?? [],
@@ -4232,11 +4232,16 @@ export const adminDoctorService = {
    * Toggle doctor status (active/inactive)
    * PATCH /api/admin/doctors/{id}/toggle-status
    */
+  // async toggleStatus(id: string): Promise<ApiResponse<void>> {
+  //   try {
+  //     await apiCall(`/api/admin/doctors/${id}/toggle-status`, {
+  //       method: "PATCH",
+  //     });
   async toggleStatus(id: string): Promise<ApiResponse<void>> {
-    try {
-      await apiCall(`/api/admin/doctors/${id}/toggle-status`, {
-        method: "PATCH",
-      });
+  try {
+    await apiCall(`/api/admin/doctors/toggle-status/${id}`, {
+      method: "PUT",
+    });
       return {
         data: undefined,
         success: true,

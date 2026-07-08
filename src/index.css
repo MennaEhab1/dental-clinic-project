@@ -53,7 +53,7 @@
 
     --gradient-primary: linear-gradient(
       135deg,
-      hsl(253, 62%, 47%),
+      hsl(180, 62%, 47%),
       hsl(199 89% 48%)
     );
     --gradient-hero: linear-gradient(

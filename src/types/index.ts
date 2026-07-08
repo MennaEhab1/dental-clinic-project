@@ -224,6 +224,18 @@ export interface Review {
   helpful?: number;
 }
 
+export interface HomeStatistics {
+  patientsCount: number;
+  doctorsCount: number;
+}
+
+export interface HomeTopReview {
+  rating: number;
+  comment: string;
+  patientName: string;
+  profileImageUrl: string | null;
+}
+
 export interface DashboardStats {
   totalPatients: number;
   totalDoctors: number;

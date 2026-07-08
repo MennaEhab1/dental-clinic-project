@@ -64,7 +64,22 @@ export function Header() {
               Dental<span className="gradient-text">Care</span>
             </span> */}
             {/* <img src="/public/Logo.png" alt="" className="h-16 w-auto" /> */}
-            <img src="/public/LogoLunare.png" alt="" className="h-16 w-auto" />
+            <img
+              src="/public/LogoLunare.png"
+              alt="Lunare Logo"
+              className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+            />
           </Link>
 
           {/* Desktop Navigation */}
@@ -87,11 +102,11 @@ export function Header() {
           {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-4">
             <a
-              href="tel:+15551234567"
+              href="tel:+2018173505"
               className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
             >
               <Phone className="w-4 h-4" />
-              <span>+1 555-123-4567</span>
+              <span>+2018173505</span>
             </a>
             <ThemeToggle />
             {isAuthenticated ? (

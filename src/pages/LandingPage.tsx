@@ -14,11 +14,13 @@ import {
   ArrowRight,
   Stethoscope,
   Sparkles,
-  Users,
-  Award,
 } from "lucide-react";
-import { doctorService, serviceService } from "@/services/api";
-import type { Doctor, Service } from "@/types";
+import { doctorService, homeService, serviceService } from "@/services/api";
+import type { Doctor, HomeStatistics, HomeTopReview, Service } from "@/types";
+import ShinyText from "@/Motions/ShinyText";
+import CountUp from "@/Motions/CountUp";
+import StarBorder from "@/Motions/StarBorder";
+import BorderGlow from "./BorderGlow";
 
 const fadeInUp = {
   initial: { opacity: 0, y: 30 },
@@ -58,56 +60,34 @@ const features = [
   },
 ];
 
-const stats = [
-  { value: "15+", label: "Years Experience" },
-  { value: "50K+", label: "Happy Patients" },
-  { value: "12", label: "Expert Dentists" },
-];
-
-const testimonials = [
-  {
-    name: "Sarah Mitchell",
-    role: "Patient",
-    avatar:
-      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face",
-    content:
-      "The best dental experience I've ever had. The staff is incredibly friendly and the results exceeded my expectations.",
-    rating: 5,
-  },
-  {
-    name: "Michael Torres",
-    role: "Patient",
-    avatar:
-      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face",
-    content:
-      "Dr. Chen's orthodontic treatment completely transformed my smile. I couldn't be happier with the results!",
-    rating: 5,
-  },
-  {
-    name: "Emily Parker",
-    role: "Patient",
-    avatar:
-      "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop&crop=face",
-    content:
-      "My kids actually look forward to their dental visits now. Dr. Patel makes everything so fun and comfortable for them.",
-    rating: 5,
-  },
-];
+function formatCount(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return value.toLocaleString();
+}
 
 export default function LandingPage() {
   const [featuredDoctors, setFeaturedDoctors] = useState<Doctor[]>([]);
   const [featuredServices, setFeaturedServices] = useState<Service[]>([]);
+  const [homeStatistics, setHomeStatistics] = useState<HomeStatistics | null>(
+    null,
+  );
+  const [topReviews, setTopReviews] = useState<HomeTopReview[]>([]);
 
   useEffect(() => {
     const loadFeaturedData = async () => {
       try {
-        const [doctorsRes, servicesRes] = await Promise.all([
-          doctorService.getAll(),
-          serviceService.getAll(),
-        ]);
+        const [doctorsRes, servicesRes, statisticsRes, reviewsRes] =
+          await Promise.all([
+            doctorService.getAll(),
+            serviceService.getAll(),
+            homeService.getStatistics(),
+            homeService.getTopReviews(),
+          ]);
 
         setFeaturedDoctors(doctorsRes.data.slice(0, 3));
         setFeaturedServices(servicesRes.data.slice(0, 4));
+        setHomeStatistics(statisticsRes.data);
+        setTopReviews(reviewsRes.data);
       } catch (error) {
         console.error("Failed to load landing data", error);
       }
@@ -120,7 +100,7 @@ export default function LandingPage() {
     <MainLayout>
       {/* Hero Section */}
       <section className="relative overflow-hidden gradient-hero-bg">
-        <div className="container mx-auto px-4 py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 py-16 md:py-24 lg:py-16">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <motion.div
               initial={{ opacity: 0, x: -30 }}
@@ -129,10 +109,23 @@ export default function LandingPage() {
             >
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
                 <Sparkles className="w-4 h-4" />
-                Trusted by 50,000+ patients
+                Trusted by our patients
               </div>
+
               <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold text-foreground leading-tight mb-6">
-                Your Perfect Smile{" "}
+                <ShinyText
+                  text="Your Perfect Smile"
+                  speed={2}
+                  delay={0}
+                  color="#b5b5b5"
+                  shineColor="#ffffff"
+                  spread={120}
+                  direction="left"
+                  yoyo={false}
+                  pauseOnHover={false}
+                  disabled={false}
+                />{" "}
+                <br />
                 <span className="gradient-text">Starts Here</span>
               </h1>
               <p className="text-lg text-muted-foreground mb-8 max-w-lg">
@@ -156,8 +149,17 @@ export default function LandingPage() {
               </div>
 
               {/* Quick Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-12">
-                {stats.map((stat, index) => (
+              <div className="grid grid-cols-2 gap-6 mt-12 max-w-lg">
+                {[
+                  {
+                    value: Number(formatCount(homeStatistics?.patientsCount)),
+                    label: "Happy Patients",
+                  },
+                  {
+                    value: Number(formatCount(homeStatistics?.doctorsCount)),
+                    label: "Expert Dentists",
+                  },
+                ].map((stat, index) => (
                   <motion.div
                     key={stat.label}
                     initial={{ opacity: 0, y: 20 }}
@@ -166,7 +168,15 @@ export default function LandingPage() {
                     className="text-center"
                   >
                     <p className="text-2xl md:text-3xl font-display font-bold gradient-text">
-                      {stat.value}
+                      <CountUp
+                        from={0}
+                        to={Number(stat.value || 0)}
+                        separator=","
+                        direction="up"
+                        duration={1}
+                        className="count-up-text"
+                        delay={0}
+                      />
                     </p>
                     <p className="text-sm text-muted-foreground">
                       {stat.label}
@@ -204,7 +214,7 @@ export default function LandingPage() {
                   <div>
                     <p className="font-semibold text-foreground">Expert Care</p>
                     <p className="text-sm text-muted-foreground">
-                      12 Specialists
+                      {formatCount(homeStatistics?.doctorsCount)} Doctors
                     </p>
                   </div>
                 </div>
@@ -228,6 +238,7 @@ export default function LandingPage() {
       </section>
 
       {/* Features Section */}
+
       <section className="py-16 md:py-24 bg-card">
         <div className="container mx-auto px-4">
           <motion.div
@@ -251,20 +262,21 @@ export default function LandingPage() {
             className="grid md:grid-cols-2 lg:grid-cols-4 gap-6"
           >
             {features.map((feature) => (
-              <motion.div
-                key={feature.title}
-                variants={fadeInUp}
-                className="p-6 rounded-2xl bg-background border border-border hover:shadow-card transition-shadow group"
-              >
-                <div className="w-14 h-14 rounded-xl gradient-bg flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <feature.icon className="w-7 h-7 text-primary-foreground" />
-                </div>
-                <h3 className="font-display font-semibold text-lg text-foreground mb-2">
-                  {feature.title}
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  {feature.description}
-                </p>
+              <motion.div key={feature.title} variants={fadeInUp} className="">
+                <BorderGlow
+                  colors={["#c084fc", "#f472b6", "#38bdf8"]}
+                  className="p-6 rounded-2xl bg-background border border-border hover:shadow-card transition-shadow group"
+                >
+                  <div className="w-14 h-14 rounded-xl gradient-bg flex items-center justify-center mb-4 group-hover:scale-104 transition-transform">
+                    <feature.icon className="w-7 h-7 text-primary-foreground" />
+                  </div>
+                  <h3 className="font-display font-semibold text-lg text-foreground mb-2">
+                    {feature.title}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {feature.description}
+                  </p>
+                </BorderGlow>
               </motion.div>
             ))}
           </motion.div>
@@ -367,9 +379,9 @@ export default function LandingPage() {
           </motion.div>
 
           <div className="grid md:grid-cols-3 gap-6">
-            {testimonials.map((testimonial, index) => (
+            {topReviews.map((review, index) => (
               <motion.div
-                key={testimonial.name}
+                key={`${review.patientName}-${index}`}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
@@ -377,29 +389,37 @@ export default function LandingPage() {
                 className="p-6 rounded-2xl bg-card border border-border"
               >
                 <div className="flex items-center gap-1 mb-4">
-                  {[...Array(testimonial.rating)].map((_, i) => (
+                  {[...Array(review.rating)].map((_, i) => (
                     <Star
                       key={i}
                       className="w-4 h-4 text-warning fill-warning"
                     />
                   ))}
                 </div>
-                <p className="text-muted-foreground mb-6">
-                  {testimonial.content}
-                </p>
+                <p className="text-muted-foreground mb-6">{review.comment}</p>
                 <div className="flex items-center gap-3">
-                  <img
-                    src={testimonial.avatar}
-                    alt={testimonial.name}
-                    className="w-12 h-12 rounded-full object-cover"
-                  />
+                  {review.profileImageUrl ? (
+                    <img
+                      src={review.profileImageUrl}
+                      alt={review.patientName}
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold">
+                      {review.patientName
+                        .split(" ")
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((part) => part[0])
+                        .join("")
+                        .toUpperCase()}
+                    </div>
+                  )}
                   <div>
                     <p className="font-semibold text-foreground">
-                      {testimonial.name}
+                      {review.patientName}
                     </p>
-                    <p className="text-sm text-muted-foreground">
-                      {testimonial.role}
-                    </p>
+                    <p className="text-sm text-muted-foreground">Patient</p>
                   </div>
                 </div>
               </motion.div>
@@ -432,11 +452,11 @@ export default function LandingPage() {
                     Book Appointment
                   </Button>
                 </Link>
-                <a href="tel:+15551234567">
+                <a href="tel:+201018173505">
                   <Button
                     size="lg"
                     variant="outline"
-                    className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
+                    className="border-primary-foreground/30 text-primary-foreground bg-primary-foreground/10 hover:bg-primary-foreground/0"
                   >
                     Call Us Now
                   </Button>

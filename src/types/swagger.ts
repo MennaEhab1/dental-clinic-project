@@ -148,6 +148,18 @@ export interface PatientReviewViewDto {
   date?: string | null;
 }
 
+export interface HomeStatisticsDTO {
+  patientsCount?: number | null;
+  doctorsCount?: number | null;
+}
+
+export interface HomeTopReviewDTO {
+  rating?: number | null;
+  comment?: string | null;
+  patientName?: string | null;
+  profileImageUrl?: string | null;
+}
+
 export interface UpdateMedicalRecordRequest {
   id: string;
   appointmentId: number;
@@ -193,6 +205,8 @@ export const SwaggerTypes = {
   AddReviewDTO: undefined as unknown as AddReviewDTO,
   UpdateReviewDTO: undefined as unknown as UpdateReviewDTO,
   PatientReviewViewDto: undefined as unknown as PatientReviewViewDto,
+  HomeStatisticsDTO: undefined as unknown as HomeStatisticsDTO,
+  HomeTopReviewDTO: undefined as unknown as HomeTopReviewDTO,
   UpdateMedicalRecordRequest:
     undefined as unknown as UpdateMedicalRecordRequest,
 };

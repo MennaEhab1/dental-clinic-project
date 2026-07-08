@@ -20,6 +20,8 @@ import type {
   Conversation,
   Message,
   DashboardStats,
+  HomeStatistics,
+  HomeTopReview,
   AuthCredentials,
   RegisterData,
   User,
@@ -40,6 +42,8 @@ import type {
   CreateMedicalRecordDto,
   AddReviewDTO,
   UpdateReviewDTO,
+  HomeStatisticsDTO,
+  HomeTopReviewDTO,
 } from "@/types/swagger";
 
 // Real backend API endpoint
@@ -376,6 +380,50 @@ function mapBackendDashboardStats(raw: unknown): DashboardStats {
   };
 }
 
+function mapBackendHomeStatistics(raw: unknown): HomeStatistics {
+  const fallback: HomeStatistics = {
+    patientsCount: 0,
+    doctorsCount: 0,
+  };
+
+  if (!raw || typeof raw !== "object") {
+    return fallback;
+  }
+
+  const item = raw as HomeStatisticsDTO & Record<string, unknown>;
+
+  return {
+    patientsCount: toSafeNumber(item.patientsCount ?? item.PatientsCount),
+    doctorsCount: toSafeNumber(item.doctorsCount ?? item.DoctorsCount),
+  };
+}
+
+function mapBackendHomeTopReview(raw: unknown): HomeTopReview[] {
+  return extractApiArray(raw)
+    .map((item) => {
+      const review = item as HomeTopReviewDTO & Record<string, unknown>;
+      const patientName = String(
+        review.patientName ?? review.PatientName ?? "",
+      ).trim();
+      const comment = String(review.comment ?? review.Comment ?? "").trim();
+      if (!patientName && !comment) return null;
+
+      return {
+        rating: Math.min(
+          5,
+          Math.max(0, toSafeNumber(review.rating ?? review.Rating)),
+        ),
+        comment,
+        patientName: patientName || "Anonymous Patient",
+        profileImageUrl:
+          resolveBackendAssetUrl(
+            String(review.profileImageUrl ?? review.ProfileImageUrl ?? ""),
+          ) ?? null,
+      } satisfies HomeTopReview;
+    })
+    .filter((review): review is HomeTopReview => review !== null);
+}
+
 /**
  * Decode JWT token to extract claims (for debugging)
  * @param token - JWT token
@@ -570,6 +618,7 @@ async function apiCall<T>(
     "/api/Account/forgot-password",
     "/api/Account/reset-password",
     "/api/Account/RefreshToken",
+    "/api/Home",
     "/swagger",
     "/api/Lookup/Doctors",
     "/api/Lookup/Specializations",
@@ -3298,11 +3347,13 @@ export const appointmentService = {
       "";
 
     const rawAmount =
-      item.amount ?? item.price ?? item.totalAmount ?? item.fee ?? fallback?.amount;
+      item.amount ??
+      item.price ??
+      item.totalAmount ??
+      item.fee ??
+      fallback?.amount;
     const amount =
-      typeof rawAmount === "number"
-        ? rawAmount
-        : Number(rawAmount ?? 0);
+      typeof rawAmount === "number" ? rawAmount : Number(rawAmount ?? 0);
 
     return {
       id: String(item.appointmentId || item.id || fallback?.id || ""),
@@ -3523,6 +3574,46 @@ export const dashboardService = {
   async getRecentPatients(limit: number = 5): Promise<ApiResponse<Patient[]>> {
     await delay(400);
     return { data: mockPatients.slice(0, limit), success: true };
+  },
+};
+
+export const homeService = {
+  async getStatistics(): Promise<ApiResponse<HomeStatistics>> {
+    try {
+      const res = await apiCall<unknown>("/api/Home/statistics", {
+        method: "GET",
+      });
+      return { data: mapBackendHomeStatistics(res.data), success: true };
+    } catch (error) {
+      console.error("[homeService.getStatistics] Error:", error);
+      return {
+        data: { patientsCount: 0, doctorsCount: 0 },
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch home statistics",
+      };
+    }
+  },
+
+  async getTopReviews(): Promise<ApiResponse<HomeTopReview[]>> {
+    try {
+      const res = await apiCall<unknown>("/api/Home/top-reviews", {
+        method: "GET",
+      });
+      return { data: mapBackendHomeTopReview(res.data), success: true };
+    } catch (error) {
+      console.error("[homeService.getTopReviews] Error:", error);
+      return {
+        data: [],
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch top reviews",
+      };
+    }
   },
 };
 
@@ -3967,7 +4058,10 @@ export const adminDoctorService = {
         doc.specialty ??
         undefined,
       specialityName:
-        doc.specialityName ?? doc.specializationName ?? doc.specialty ?? undefined,
+        doc.specialityName ??
+        doc.specializationName ??
+        doc.specialty ??
+        undefined,
       salary: doc.salary ?? doc.consultationFee ?? 0,
       consultationFee: doc.consultationFee ?? doc.salary ?? 0,
       workingHours: doc.workingHours ?? doc.experience ?? 0,
@@ -4238,10 +4332,10 @@ export const adminDoctorService = {
   //       method: "PATCH",
   //     });
   async toggleStatus(id: string): Promise<ApiResponse<void>> {
-  try {
-    await apiCall(`/api/admin/doctors/toggle-status/${id}`, {
-      method: "PUT",
-    });
+    try {
+      await apiCall(`/api/admin/doctors/toggle-status/${id}`, {
+        method: "PUT",
+      });
       return {
         data: undefined,
         success: true,
@@ -4789,6 +4883,812 @@ export const doctorScheduleService = {
       const message = error instanceof Error ? error.message : "Unknown error";
       console.error("[doctorScheduleService.remove] Error:", message, error);
       return { data: undefined, success: false, message };
+    }
+  },
+};
+
+// ============================================================
+// ADMIN PHARMACY SERVICE
+// ============================================================
+
+/**
+ * NOTE ON BACKEND CONTRACT ASSUMPTIONS:
+ * The live Swagger UI at /swagger/index.html renders client-side and its
+ * swagger.json could not be fetched to confirm exact field casing, so the
+ * mappers below read every common casing variant (id/Id, name/Name, ...)
+ * the way the rest of this file already does for other admin endpoints.
+ * If the backend uses different field names, only the mapBackend*
+ * functions below need to change — nothing in the UI layer does.
+ */
+export interface Pharmacy {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  email?: string;
+  openingTime?: string;
+  closingTime?: string;
+  isActive?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+/** Parses a possibly-missing coordinate into a finite number, or null if absent/invalid. */
+function toOptionalCoordinate(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function normalizeTimeForInput(value: unknown): string | undefined {
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+
+  const hhmm = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (hhmm) {
+    const hour = String(Math.min(23, Math.max(0, Number(hhmm[1])))).padStart(
+      2,
+      "0",
+    );
+    return `${hour}:${hhmm[2]}`;
+  }
+
+  const ampm = raw.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+  if (ampm) {
+    const parsedHour = Number(ampm[1]);
+    const minute = ampm[2];
+    const period = ampm[3].toLowerCase();
+    const hour24 =
+      period === "pm"
+        ? parsedHour === 12
+          ? 12
+          : parsedHour + 12
+        : parsedHour === 12
+          ? 0
+          : parsedHour;
+    return `${String(hour24).padStart(2, "0")}:${minute}`;
+  }
+
+  const hourAmPm = raw.match(/^(\d{1,2})\s*(am|pm)$/i);
+  if (hourAmPm) {
+    const parsedHour = Number(hourAmPm[1]);
+    const period = hourAmPm[2].toLowerCase();
+    const hour24 =
+      period === "pm"
+        ? parsedHour === 12
+          ? 12
+          : parsedHour + 12
+        : parsedHour === 12
+          ? 0
+          : parsedHour;
+    return `${String(hour24).padStart(2, "0")}:00`;
+  }
+
+  return undefined;
+}
+
+function toBackendWorkingTime(value: string): string {
+  const [rawHour, rawMinute = "00"] = value.split(":");
+  const hour24 = Number(rawHour);
+  const minute = String(rawMinute).padStart(2, "0");
+
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return minute === "00"
+    ? `${hour12} ${period}`
+    : `${hour12}:${minute} ${period}`;
+}
+
+function splitWorkingHours(value: unknown): {
+  openingTime?: string;
+  closingTime?: string;
+} {
+  const raw = String(value ?? "").trim();
+  if (!raw) return {};
+
+  const parts = raw.split(/\s*(?:-|–|—|to)\s*/i).filter(Boolean);
+  if (parts.length < 2) {
+    return { openingTime: normalizeTimeForInput(raw) };
+  }
+
+  return {
+    openingTime: normalizeTimeForInput(parts[0]),
+    closingTime: normalizeTimeForInput(parts[1]),
+  };
+}
+
+function mapBackendPharmacy(raw: unknown): Pharmacy {
+  const item =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const location =
+    item.location && typeof item.location === "object"
+      ? (item.location as Record<string, unknown>)
+      : item.Location && typeof item.Location === "object"
+        ? (item.Location as Record<string, unknown>)
+        : {};
+  const coords =
+    item.coordinates && typeof item.coordinates === "object"
+      ? (item.coordinates as Record<string, unknown>)
+      : item.Coordinates && typeof item.Coordinates === "object"
+        ? (item.Coordinates as Record<string, unknown>)
+        : {};
+
+  const fromWorkingHours = splitWorkingHours(
+    item.workingHours ?? item.WorkingHours,
+  );
+
+  const openingTime =
+    normalizeTimeForInput(item.openingTime ?? item.OpeningTime) ??
+    fromWorkingHours.openingTime;
+  const closingTime =
+    normalizeTimeForInput(item.closingTime ?? item.ClosingTime) ??
+    fromWorkingHours.closingTime;
+
+  return {
+    id: String(item.id ?? item.Id ?? item.pharmacyId ?? item.PharmacyId ?? ""),
+    name: String(
+      item.name ?? item.Name ?? item.pharmacyName ?? item.PharmacyName ?? "",
+    ),
+    address: String(
+      item.address ?? item.Address ?? item.location ?? item.Location ?? "",
+    ),
+    phone: String(
+      item.phone ?? item.Phone ?? item.phoneNumber ?? item.PhoneNumber ?? "",
+    ),
+    email:
+      item.email || item.Email ? String(item.email ?? item.Email) : undefined,
+    openingTime,
+    closingTime,
+    isActive:
+      typeof item.isActive === "boolean"
+        ? item.isActive
+        : typeof item.IsActive === "boolean"
+          ? item.IsActive
+          : true,
+    latitude: toOptionalCoordinate(
+      item.latitude ??
+        item.Latitude ??
+        item.lat ??
+        item.Lat ??
+        location.latitude ??
+        location.Latitude ??
+        location.lat ??
+        location.Lat ??
+        coords.latitude ??
+        coords.Latitude ??
+        coords.lat ??
+        coords.Lat,
+    ),
+    longitude: toOptionalCoordinate(
+      item.longitude ??
+        item.Longitude ??
+        item.lng ??
+        item.Lng ??
+        item.long ??
+        item.Long ??
+        location.longitude ??
+        location.Longitude ??
+        location.lng ??
+        location.Lng ??
+        location.long ??
+        location.Long ??
+        coords.longitude ??
+        coords.Longitude ??
+        coords.lng ??
+        coords.Lng ??
+        coords.long ??
+        coords.Long,
+    ),
+  };
+}
+
+function buildWorkingHoursFromPharmacyData(data: Partial<Pharmacy>): string {
+  const opening = normalizeTimeForInput(data.openingTime) || "";
+  const closing = normalizeTimeForInput(data.closingTime) || "";
+  const explicit = String(
+    (data as Record<string, unknown>).workingHours || "",
+  ).trim();
+
+  if (opening && closing) {
+    return `${toBackendWorkingTime(opening)} - ${toBackendWorkingTime(closing)}`;
+  }
+  if (opening) return toBackendWorkingTime(opening);
+  if (closing) return toBackendWorkingTime(closing);
+  return explicit;
+}
+
+function extractWorkingHoursPayload(data: Partial<Pharmacy>): string {
+  const workingHours = buildWorkingHoursFromPharmacyData(data).trim();
+  if (workingHours) return workingHours;
+
+  const rawOpening = String(data.openingTime ?? "").trim();
+  const rawClosing = String(data.closingTime ?? "").trim();
+  if (rawOpening && rawClosing) return `${rawOpening} - ${rawClosing}`;
+  if (rawOpening) return rawOpening;
+  if (rawClosing) return rawClosing;
+
+  return "";
+}
+
+function toBackendId(value: unknown): number | string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const direct = Number(raw);
+  if (Number.isFinite(direct)) return direct;
+
+  const numericMatch = raw.match(/\d+/);
+  if (numericMatch) {
+    const parsed = Number(numericMatch[0]);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return raw;
+}
+
+function toBackendPositiveInt(value: unknown): number | null {
+  const normalized = toBackendId(value);
+  const parsed =
+    typeof normalized === "number"
+      ? normalized
+      : Number(String(normalized).trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.trunc(parsed);
+}
+
+function extractServiceErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}
+
+/**
+ * Admin Pharmacy Management
+ * GET    /api/Pharmacy/Get-All-Pharmacies
+ * GET    /api/Pharmacy/Get-Pharmacy-Details/{id}
+ * POST   /api/Pharmacy/Create-Pharmacy
+ * PUT    /api/Pharmacy/Update-Pharmacy
+ * DELETE /api/Pharmacy/Delete-Pharmacy/{id}
+ */
+export const adminPharmacyService = {
+  /**
+   * Get all pharmacies
+   * GET /api/Pharmacy/Get-All-Pharmacies
+   */
+  async getAll(): Promise<ApiResponse<Pharmacy[]>> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await apiCall<any>("/api/Pharmacy/Get-All-Pharmacies", {
+        method: "GET",
+      });
+      console.debug("[adminPharmacyService.getAll] Raw response:", res.data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list: unknown[] = Array.isArray(raw)
+        ? raw
+        : (raw?.value ?? raw?.data ?? []);
+      const pharmacies = list.map(mapBackendPharmacy);
+      return { data: pharmacies, success: true };
+    } catch (error) {
+      console.error("[adminPharmacyService.getAll] Error:", error);
+      return {
+        data: [],
+        success: false,
+        message: extractServiceErrorMessage(error, "Failed to load pharmacies"),
+      };
+    }
+  },
+
+  /**
+   * Get a single pharmacy's details
+   * GET /api/Pharmacy/Get-Pharmacy-Details/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<Pharmacy>> {
+    try {
+      const res = await apiCall<unknown>(
+        `/api/Pharmacy/Get-Pharmacy-Details/${id}`,
+        { method: "GET" },
+      );
+      return { data: mapBackendPharmacy(res.data), success: true };
+    } catch (error) {
+      console.error("[adminPharmacyService.getById] Error:", error);
+      return {
+        data: {} as Pharmacy,
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to load pharmacy details",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Create a new pharmacy
+   * POST /api/Pharmacy/Create-Pharmacy
+   */
+  async create(data: Partial<Pharmacy>): Promise<ApiResponse<Pharmacy>> {
+    try {
+      const workingHours = extractWorkingHoursPayload(data);
+      if (!workingHours) {
+        throw new Error("Opening and closing time are required");
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        name: data.name ?? "",
+        address: data.address ?? "",
+        phone: data.phone ?? "",
+        workingHours,
+        WorkingHours: workingHours,
+        latitude:
+          typeof data.latitude === "number" && Number.isFinite(data.latitude)
+            ? data.latitude
+            : undefined,
+        longitude:
+          typeof data.longitude === "number" && Number.isFinite(data.longitude)
+            ? data.longitude
+            : undefined,
+      };
+      const res = await apiCall<unknown>("/api/Pharmacy/Create-Pharmacy", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return {
+        data: mapBackendPharmacy(res.data ?? payload),
+        success: true,
+        message: "Pharmacy created successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyService.create] Error:", error);
+      return {
+        data: {} as Pharmacy,
+        success: false,
+        message: extractServiceErrorMessage(error, "Failed to create pharmacy"),
+      };
+    }
+  },
+
+  /**
+   * Update an existing pharmacy.
+   * The endpoint has no {id} in its path, so the id travels in the body —
+   * this is the standard shape for this backend's "Update-X" endpoints.
+   * PUT /api/Pharmacy/Update-Pharmacy
+   */
+  async update(
+    id: string,
+    data: Partial<Pharmacy>,
+  ): Promise<ApiResponse<Pharmacy>> {
+    try {
+      const workingHours = extractWorkingHoursPayload(data);
+      if (!workingHours) {
+        throw new Error("Opening and closing time are required");
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        id: toBackendId(id),
+        name: data.name ?? "",
+        address: data.address ?? "",
+        phone: data.phone ?? "",
+        workingHours,
+        WorkingHours: workingHours,
+        latitude:
+          typeof data.latitude === "number" && Number.isFinite(data.latitude)
+            ? data.latitude
+            : undefined,
+        longitude:
+          typeof data.longitude === "number" && Number.isFinite(data.longitude)
+            ? data.longitude
+            : undefined,
+      };
+      const res = await apiCall<unknown>("/api/Pharmacy/Update-Pharmacy", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      return {
+        data: mapBackendPharmacy(res.data ?? payload),
+        success: true,
+        message: "Pharmacy updated successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyService.update] Error:", error);
+      return {
+        data: {} as Pharmacy,
+        success: false,
+        message: extractServiceErrorMessage(error, "Failed to update pharmacy"),
+      };
+    }
+  },
+
+  /**
+   * Delete a pharmacy
+   * DELETE /api/Pharmacy/Delete-Pharmacy/{id}
+   */
+  async remove(id: string): Promise<ApiResponse<void>> {
+    try {
+      await apiCall(`/api/Pharmacy/Delete-Pharmacy/${toBackendId(id)}`, {
+        method: "DELETE",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Pharmacy deleted successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyService.remove] Error:", error);
+      return {
+        data: undefined,
+        success: false,
+        message: extractServiceErrorMessage(error, "Failed to delete pharmacy"),
+      };
+    }
+  },
+};
+
+// ============================================================
+// ADMIN PHARMACY MEDICINE SERVICE
+// ============================================================
+
+export interface PharmacyMedicineItem {
+  id: string;
+  pharmacyId: string;
+  medicineId: string;
+  medicineName: string;
+  genericName?: string;
+  category?: string;
+  manufacturer?: string;
+  price: number;
+  stock: number;
+  unit: string;
+}
+
+function mapBackendPharmacyMedicine(raw: unknown): PharmacyMedicineItem {
+  const item =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  // Some endpoints nest the catalog medicine under a "medicine" object
+  const nestedMedicine =
+    item.medicine && typeof item.medicine === "object"
+      ? (item.medicine as Record<string, unknown>)
+      : item.Medicine && typeof item.Medicine === "object"
+        ? (item.Medicine as Record<string, unknown>)
+        : {};
+
+  return {
+    id: String(
+      item.id ??
+        item.Id ??
+        item.pharmacyMedicineId ??
+        item.PharmacyMedicineId ??
+        item.pharmacyMedicineID ??
+        item.PharmacyMedicineID ??
+        item.medicineID ??
+        item.medicineId ??
+        item.MedicineID ??
+        item.MedicineId ??
+        "",
+    ),
+    pharmacyId: String(
+      item.pharmacyId ??
+        item.PharmacyId ??
+        item.pharmacyID ??
+        item.PharmacyID ??
+        item.pharmacy_id ??
+        "",
+    ),
+    medicineId: String(
+      item.medicineId ??
+        item.MedicineId ??
+        item.medicineID ??
+        item.MedicineID ??
+        nestedMedicine.id ??
+        nestedMedicine.Id ??
+        "",
+    ),
+    medicineName: String(
+      item.medicineName ??
+        item.MedicineName ??
+        item.name ??
+        item.Name ??
+        nestedMedicine.name ??
+        nestedMedicine.Name ??
+        "Unknown Medicine",
+    ),
+    genericName: String(
+      item.genericName ??
+        item.GenericName ??
+        nestedMedicine.genericName ??
+        nestedMedicine.GenericName ??
+        "",
+    ),
+    category: String(
+      item.category ??
+        item.Category ??
+        nestedMedicine.category ??
+        nestedMedicine.Category ??
+        "",
+    ),
+    manufacturer: String(
+      item.manufacturer ??
+        item.Manufacturer ??
+        nestedMedicine.manufacturer ??
+        nestedMedicine.Manufacturer ??
+        "",
+    ),
+    price: toSafeNumber(item.price ?? item.Price),
+    stock: toSafeNumber(
+      item.stock ??
+        item.Stock ??
+        item.stockQuantity ??
+        item.StockQuantity ??
+        item.quantity ??
+        item.Quantity,
+    ),
+    unit: String(item.unit ?? item.Unit ?? "unit"),
+  };
+}
+
+/**
+ * Admin Pharmacy Medicine Management
+ * GET    /api/PharmacyMedicine/Get-All                 — all pharmacy-medicine records (admin-wide)
+ * GET    /api/PharmacyMedicine/Get-By-Id/{id}
+ * POST   /api/PharmacyMedicine/Create                  — attach a catalog medicine to a pharmacy
+ * PUT    /api/PharmacyMedicine/Update
+ * DELETE /api/PharmacyMedicine/Delete/{id}
+ * GET    /api/PharmacyMedicine/{pharmacyId}/medicines   — medicines stocked by one pharmacy
+ */
+export const adminPharmacyMedicineService = {
+  /**
+   * Get every pharmacy-medicine record in the system
+   * GET /api/PharmacyMedicine/Get-All
+   */
+  async getAll(): Promise<ApiResponse<PharmacyMedicineItem[]>> {
+    try {
+      const res = await apiCall<unknown>("/api/PharmacyMedicine/Get-All", {
+        method: "GET",
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list: unknown[] = Array.isArray(raw)
+        ? raw
+        : (raw?.value ?? raw?.data ?? []);
+      return { data: list.map(mapBackendPharmacyMedicine), success: true };
+    } catch (error) {
+      console.error("[adminPharmacyMedicineService.getAll] Error:", error);
+      return {
+        data: [],
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to load pharmacy medicines",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Get the medicines stocked by a specific pharmacy
+   * GET /api/PharmacyMedicine/{pharmacyId}/medicines
+   */
+  async getByPharmacy(
+    pharmacyId: string,
+  ): Promise<ApiResponse<PharmacyMedicineItem[]>> {
+    try {
+      const res = await apiCall<unknown>(
+        `/api/PharmacyMedicine/${pharmacyId}/medicines`,
+        { method: "GET" },
+      );
+      console.debug(
+        "[adminPharmacyMedicineService.getByPharmacy] Raw response:",
+        res.data,
+      );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = res.data as any;
+      const list: unknown[] = Array.isArray(raw)
+        ? raw
+        : (raw?.value ?? raw?.data ?? []);
+      const medicines = list.map(mapBackendPharmacyMedicine);
+      // Backend records aren't guaranteed to carry pharmacyId when scoped by URL — backfill it
+      return {
+        data: medicines.map((m) => ({
+          ...m,
+          pharmacyId: m.pharmacyId || pharmacyId,
+        })),
+        success: true,
+      };
+    } catch (error) {
+      console.error(
+        "[adminPharmacyMedicineService.getByPharmacy] Error:",
+        error,
+      );
+      return {
+        data: [],
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to load medicines for pharmacy",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Get a single pharmacy-medicine record by its id
+   * GET /api/PharmacyMedicine/Get-By-Id/{id}
+   */
+  async getById(id: string): Promise<ApiResponse<PharmacyMedicineItem>> {
+    try {
+      const res = await apiCall<unknown>(
+        `/api/PharmacyMedicine/Get-By-Id/${id}`,
+        { method: "GET" },
+      );
+      return { data: mapBackendPharmacyMedicine(res.data), success: true };
+    } catch (error) {
+      console.error("[adminPharmacyMedicineService.getById] Error:", error);
+      return {
+        data: {} as PharmacyMedicineItem,
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to load pharmacy medicine details",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Attach a catalog medicine to a pharmacy (stock it for the first time)
+   * POST /api/PharmacyMedicine/Create
+   */
+  async create(data: {
+    pharmacyId: string;
+    medicineId: string;
+    stock: number;
+  }): Promise<ApiResponse<PharmacyMedicineItem>> {
+    try {
+      const pharmacyId = toBackendPositiveInt(data.pharmacyId);
+      const medicineId = toBackendPositiveInt(data.medicineId);
+      const stockQuantity = Number.isFinite(data.stock)
+        ? Math.trunc(data.stock)
+        : NaN;
+
+      if (!pharmacyId || !medicineId) {
+        throw new Error("Valid pharmacyID and medicineID are required");
+      }
+      if (!Number.isFinite(stockQuantity) || stockQuantity < 0) {
+        throw new Error("Valid stockQuantity is required");
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        pharmacyID: pharmacyId,
+        medicineID: medicineId,
+        stockQuantity,
+      };
+      const res = await apiCall<unknown>("/api/PharmacyMedicine/Create", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      return {
+        data: mapBackendPharmacyMedicine(res.data ?? payload),
+        success: true,
+        message: "Medicine added to pharmacy successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyMedicineService.create] Error:", error);
+      return {
+        data: {} as PharmacyMedicineItem,
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to add medicine to pharmacy",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Update a pharmacy-medicine record (price/stock/unit).
+   * No {id} in the path, so it travels in the body.
+   * PUT /api/PharmacyMedicine/Update
+   */
+  async update(
+    id: string,
+    data: {
+      pharmacyId?: string;
+      medicineId?: string;
+      stock?: number;
+    },
+  ): Promise<ApiResponse<PharmacyMedicineItem>> {
+    try {
+      if (!data.pharmacyId || !data.medicineId) {
+        throw new Error("pharmacyId and medicineId are required for update");
+      }
+
+      const pharmacyId = toBackendPositiveInt(data.pharmacyId);
+      const medicineId = toBackendPositiveInt(data.medicineId);
+      const stockQuantity = Number.isFinite(data.stock)
+        ? Math.trunc(data.stock as number)
+        : NaN;
+
+      if (!pharmacyId || !medicineId) {
+        throw new Error("Valid pharmacyID and medicineID are required");
+      }
+      if (!Number.isFinite(stockQuantity) || stockQuantity < 0) {
+        throw new Error("Valid stockQuantity is required");
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = {
+        pharmacyID: pharmacyId,
+        medicineID: medicineId,
+        stockQuantity,
+      };
+      const res = await apiCall<unknown>("/api/PharmacyMedicine/Update", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      return {
+        data: mapBackendPharmacyMedicine(res.data ?? payload),
+        success: true,
+        message: "Medicine updated successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyMedicineService.update] Error:", error);
+      return {
+        data: {} as PharmacyMedicineItem,
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to update pharmacy medicine",
+        ),
+      };
+    }
+  },
+
+  /**
+   * Remove a medicine from a pharmacy
+   * DELETE /api/PharmacyMedicine/Delete/{id}
+   */
+  async remove(
+    id: string,
+    refs?: { pharmacyId?: string; medicineId?: string },
+  ): Promise<ApiResponse<void>> {
+    try {
+      const effectiveId = String(
+        toBackendId(id || refs?.medicineId || ""),
+      ).trim();
+      if (!effectiveId) {
+        throw new Error("A valid medicine identifier is required for delete");
+      }
+
+      const query = new URLSearchParams();
+      if (refs?.pharmacyId) {
+        query.set("pharmacyId", String(toBackendId(refs.pharmacyId)));
+      }
+      if (refs?.medicineId) {
+        query.set("medicineId", String(toBackendId(refs.medicineId)));
+      }
+      const suffix = query.toString() ? `?${query.toString()}` : "";
+
+      await apiCall(`/api/PharmacyMedicine/Delete/${effectiveId}${suffix}`, {
+        method: "DELETE",
+      });
+      return {
+        data: undefined,
+        success: true,
+        message: "Medicine removed from pharmacy successfully",
+      };
+    } catch (error) {
+      console.error("[adminPharmacyMedicineService.remove] Error:", error);
+      return {
+        data: undefined,
+        success: false,
+        message: extractServiceErrorMessage(
+          error,
+          "Failed to remove medicine from pharmacy",
+        ),
+      };
     }
   },
 };

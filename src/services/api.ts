@@ -5,7 +5,6 @@ import {
   mockPatients,
   mockAppointments,
   mockServices,
-  mockMedicines,
   mockConversations,
   mockMessages,
   mockDashboardStats,
@@ -152,7 +151,11 @@ function splitName(fullName?: string | null): {
   firstName: string;
   lastName: string;
 } {
-  const safeName = (fullName || "").trim();
+  const safeName = String(fullName || "")
+    .replace(/[_.]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!safeName) {
     return { firstName: "Unknown", lastName: "Patient" };
   }
@@ -233,13 +236,33 @@ function mapBackendPatientProfileToPatient(
       ? rawGender
       : "other";
 
+  const explicitFirstNameRaw = String(
+    item.firstName || item.FirstName || item.first_name || "",
+  ).trim();
+  const explicitLastNameRaw = String(
+    item.lastName || item.LastName || item.last_name || "",
+  ).trim();
+
+  let firstNameFromExplicit = explicitFirstNameRaw;
+  let lastNameFromExplicit = explicitLastNameRaw;
+
+  // Some backends persist username-like values in firstName (e.g. john_doe).
+  // Split these safely so profile form fields render correctly.
+  if (explicitFirstNameRaw && !explicitLastNameRaw) {
+    const splitExplicit = splitName(explicitFirstNameRaw);
+    firstNameFromExplicit = splitExplicit.firstName;
+    lastNameFromExplicit = splitExplicit.lastName;
+  }
+
   const avatarRaw = String(
     item.avatar ||
       item.Avatar ||
       item.profileImage ||
       item.ProfileImage ||
-      item.imageUrl ||
-      item.ImageUrl ||
+      item.profileImageUrl ||
+      item.ProfileImageUrl ||
+      item.profilePicture ||
+      item.ProfilePicture ||
       fallback?.avatar ||
       "",
   );
@@ -258,18 +281,10 @@ function mapBackendPatientProfileToPatient(
     ),
     email: String(item.email || item.Email || fallback?.email || ""),
     firstName: String(
-      item.firstName ||
-        item.FirstName ||
-        item.first_name ||
-        fallback?.firstName ||
-        splitFirstName,
+      firstNameFromExplicit || fallback?.firstName || splitFirstName,
     ),
     lastName: String(
-      item.lastName ||
-        item.LastName ||
-        item.last_name ||
-        fallback?.lastName ||
-        splitLastName,
+      lastNameFromExplicit || fallback?.lastName || splitLastName,
     ),
     phone: String(
       item.phone ||
@@ -3288,9 +3303,7 @@ export const appointmentService = {
       item.patientImage ||
         item.patientImageUrl ||
         item.patientAvatar ||
-        item.patientProfileImage ||
-        item.profileImage ||
-        item.imageUrl,
+        item.patientProfileImage,
     );
     const mappedPatient = patientObj
       ? {
@@ -3303,9 +3316,7 @@ export const appointmentService = {
             resolveBackendAssetUrl(
               patientObj.avatar ||
                 patientObj.profileImage ||
-                patientObj.imageUrl ||
-                patientObj.image ||
-                patientObj.photo ||
+                patientObj.profileImageUrl ||
                 patientObj.profilePicture,
             ) ||
             patientAvatarFromPayload ||
@@ -3478,39 +3489,91 @@ export const serviceService = {
 // Pharmacy/Medicine Services
 export const pharmacyService = {
   async getAll(): Promise<PaginatedResponse<Medicine>> {
-    await delay(600);
+    const response = await apiCall<unknown>("/api/PharmacyMedicine/Get-All", {
+      method: "GET",
+    });
+
+    const records = extractApiArray(response.data);
+    const medicinesById = new Map<string, Medicine>();
+
+    for (const raw of records) {
+      const linked = mapBackendPharmacyMedicine(raw);
+      const normalizedId = String(linked.medicineId || linked.id || "").trim();
+      if (!normalizedId || medicinesById.has(normalizedId)) continue;
+
+      medicinesById.set(normalizedId, {
+        id: normalizedId,
+        name: linked.medicineName || `Medicine ${normalizedId}`,
+        genericName: linked.genericName || "",
+        category: linked.category || "",
+        manufacturer: linked.manufacturer || "",
+        price: linked.price || 0,
+        stock: linked.stock || 0,
+        unit: linked.unit || "unit",
+        description: "",
+      });
+    }
+
+    const medicines = Array.from(medicinesById.values());
     return {
-      data: mockMedicines,
-      total: mockMedicines.length,
+      data: medicines,
+      total: medicines.length,
       page: 1,
-      limit: 20,
+      limit: medicines.length || 20,
       totalPages: 1,
     };
   },
 
   async getById(id: string): Promise<ApiResponse<Medicine>> {
-    await delay(300);
-    const medicine = mockMedicines.find((m) => m.id === id);
-    if (!medicine) throw new Error("Medicine not found");
-    return { data: medicine, success: true };
+    const normalizedId = parseEntityNumericId(id);
+    if (normalizedId === null) {
+      throw new Error("Invalid medicine ID");
+    }
+
+    const response = await apiCall<unknown>(
+      `/api/PharmacyMedicine/Get-By-Id/${normalizedId}`,
+      {
+        method: "GET",
+      },
+    );
+
+    const linked = mapBackendPharmacyMedicine(response.data);
+    const medicineId = String(linked.medicineId || linked.id || normalizedId);
+
+    return {
+      data: {
+        id: medicineId,
+        name: linked.medicineName || `Medicine ${medicineId}`,
+        genericName: linked.genericName || "",
+        category: linked.category || "",
+        manufacturer: linked.manufacturer || "",
+        price: linked.price || 0,
+        stock: linked.stock || 0,
+        unit: linked.unit || "unit",
+        description: "",
+      },
+      success: true,
+    };
   },
 
   async search(query: string): Promise<ApiResponse<Medicine[]>> {
-    await delay(400);
-    const results = mockMedicines.filter(
-      (m) =>
-        m.name.toLowerCase().includes(query.toLowerCase()) ||
-        m.genericName.toLowerCase().includes(query.toLowerCase()),
-    );
+    const response = await this.getAll();
+    const normalizedQuery = query.trim().toLowerCase();
+    const results = response.data.filter((m) => {
+      if (!normalizedQuery) return true;
+      return (
+        m.name.toLowerCase().includes(normalizedQuery) ||
+        m.genericName.toLowerCase().includes(normalizedQuery)
+      );
+    });
     return { data: results, success: true };
   },
 
   async checkAvailability(
     id: string,
   ): Promise<ApiResponse<{ available: boolean; stock: number }>> {
-    await delay(300);
-    const medicine = mockMedicines.find((m) => m.id === id);
-    if (!medicine) throw new Error("Medicine not found");
+    const medicineResponse = await this.getById(id);
+    const medicine = medicineResponse.data;
     return {
       data: { available: medicine.stock > 0, stock: medicine.stock },
       success: true,

@@ -79,7 +79,10 @@ function toDoctorDisplayName(rawValue: string): string {
   if (!raw) return "";
   if (!raw.includes("@")) return raw;
 
-  const localPart = raw.split("@")[0].replace(/[._-]+/g, " ").trim();
+  const localPart = raw
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .trim();
   return toTitleCase(localPart);
 }
 

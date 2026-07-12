@@ -1,3 +1,4 @@
+//api.tsx
 import { ApiResponse, PaginatedResponse } from "@/types";
 // TODO :  امسح جزء ال mockdata
 import {
@@ -5751,6 +5752,442 @@ export const adminPharmacyMedicineService = {
           error,
           "Failed to remove medicine from pharmacy",
         ),
+      };
+    }
+  },
+};
+// ============================================================
+// PHARMACY FINDER SERVICE (نبحث عن الصيدليات اللي عندها دواء معين متوفر، مرتبة بالمسافة)
+// ============================================================
+
+export interface NearbyPharmacy {
+  id: string;
+  pharmacyName: string;
+  price: number | null;
+  quantity: number | null;
+  address: string;
+  phoneNumber: string;
+  workingHours: string;
+  latitude: number;
+  longitude: number;
+  distanceFromPatient: number; // km — جاي من الـ backend، ما بنحسبهاش إحنا خالص
+}
+
+const PHARMACY_MEDICINE_LOOKUP_TTL_MS = 5 * 60 * 1000;
+let pharmacyMedicineLookupCache: {
+  expiresAt: number;
+  byName: Map<string, string>;
+} | null = null;
+
+function normalizeMedicineLookupName(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildMedicineLookupNameVariants(value: unknown): string[] {
+  const normalized = normalizeMedicineLookupName(value);
+  if (!normalized) return [];
+
+  const variants = new Set<string>([normalized]);
+  const withoutStrength = normalized
+    .replace(/\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|kg|ml|iu|%)+\b/g, " ")
+    .replace(
+      /\b(?:tablet|tablets|capsule|capsules|syrup|cream|gel|drops)\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (withoutStrength) variants.add(withoutStrength);
+  return Array.from(variants);
+}
+
+async function getPharmacyMedicineLookupIndex(): Promise<Map<string, string>> {
+  if (
+    pharmacyMedicineLookupCache &&
+    pharmacyMedicineLookupCache.expiresAt > Date.now()
+  ) {
+    return pharmacyMedicineLookupCache.byName;
+  }
+
+  const byName = new Map<string, string>();
+
+  try {
+    const response = await apiCall<unknown>("/api/PharmacyMedicine/Get-All", {
+      method: "GET",
+    });
+
+    extractApiArray(response.data).forEach((rawItem) => {
+      const item =
+        rawItem && typeof rawItem === "object"
+          ? (rawItem as Record<string, unknown>)
+          : {};
+      const nestedMedicine =
+        item.medicine && typeof item.medicine === "object"
+          ? (item.medicine as Record<string, unknown>)
+          : item.Medicine && typeof item.Medicine === "object"
+            ? (item.Medicine as Record<string, unknown>)
+            : {};
+
+      const medicineId = toBackendPositiveInt(
+        item.medicineId ??
+          item.MedicineId ??
+          item.medicineID ??
+          item.MedicineID ??
+          nestedMedicine.id ??
+          nestedMedicine.Id,
+      );
+      if (!medicineId) return;
+
+      const candidateNames = [
+        item.medicineName,
+        item.MedicineName,
+        item.name,
+        item.Name,
+        item.genericName,
+        item.GenericName,
+        nestedMedicine.name,
+        nestedMedicine.Name,
+        nestedMedicine.genericName,
+        nestedMedicine.GenericName,
+      ];
+
+      candidateNames.forEach((candidate) => {
+        buildMedicineLookupNameVariants(candidate).forEach((variant) => {
+          if (!byName.has(variant)) {
+            byName.set(variant, String(medicineId));
+          }
+        });
+      });
+    });
+  } catch (error) {
+    console.warn(
+      "[getPharmacyMedicineLookupIndex] Failed to build medicine lookup index:",
+      error,
+    );
+  }
+
+  pharmacyMedicineLookupCache = {
+    expiresAt: Date.now() + PHARMACY_MEDICINE_LOOKUP_TTL_MS,
+    byName,
+  };
+
+  return byName;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapBackendNearbyPharmacy(raw: any): NearbyPharmacy {
+  const item = raw && typeof raw === "object" ? raw : {};
+  const nestedPharmacy =
+    item.pharmacy && typeof item.pharmacy === "object"
+      ? (item.pharmacy as Record<string, unknown>)
+      : item.Pharmacy && typeof item.Pharmacy === "object"
+        ? (item.Pharmacy as Record<string, unknown>)
+        : {};
+
+  const nestedLocation =
+    item.location && typeof item.location === "object"
+      ? (item.location as Record<string, unknown>)
+      : item.Location && typeof item.Location === "object"
+        ? (item.Location as Record<string, unknown>)
+        : {};
+
+  const openingTime = normalizeTimeForInput(
+    item.openingTime ?? item.OpeningTime ?? nestedPharmacy.openingTime,
+  );
+  const closingTime = normalizeTimeForInput(
+    item.closingTime ?? item.ClosingTime ?? nestedPharmacy.closingTime,
+  );
+  const workingHours =
+    String(
+      item.workingHours ??
+        item.WorkingHours ??
+        item.pharmacyWorkingHours ??
+        item.PharmacyWorkingHours ??
+        nestedPharmacy.workingHours ??
+        nestedPharmacy.WorkingHours ??
+        "",
+    ).trim() ||
+    (openingTime && closingTime
+      ? `${openingTime} - ${closingTime}`
+      : openingTime || closingTime || "");
+
+  return {
+    id: String(
+      item.id ??
+        item.Id ??
+        item.pharmacyId ??
+        item.PharmacyId ??
+        item.pharmacyID ??
+        item.PharmacyID ??
+        nestedPharmacy.id ??
+        nestedPharmacy.Id ??
+        "",
+    ),
+    pharmacyName: String(
+      item.pharmacyName ??
+        item.PharmacyName ??
+        item.nameAr ??
+        item.NameAr ??
+        item.name ??
+        item.Name ??
+        nestedPharmacy.pharmacyName ??
+        nestedPharmacy.PharmacyName ??
+        nestedPharmacy.name ??
+        nestedPharmacy.Name ??
+        "Unknown Pharmacy",
+    ),
+    price: (() => {
+      const value =
+        item.price ??
+        item.Price ??
+        item.medicinePrice ??
+        item.MedicinePrice ??
+        item.unitPrice ??
+        item.UnitPrice ??
+        null;
+      if (value === null || value === undefined) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    })(),
+    quantity: (() => {
+      const value =
+        item.quantity ??
+        item.Quantity ??
+        item.stock ??
+        item.Stock ??
+        item.stockQuantity ??
+        item.StockQuantity ??
+        null;
+      if (value === null || value === undefined) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    })(),
+    address: String(
+      item.address ??
+        item.Address ??
+        item.pharmacyAddress ??
+        item.PharmacyAddress ??
+        nestedLocation.address ??
+        nestedLocation.Address ??
+        nestedPharmacy.address ??
+        nestedPharmacy.Address ??
+        "",
+    ).trim(),
+    phoneNumber: String(
+      item.phoneNumber ??
+        item.PhoneNumber ??
+        item.phone ??
+        item.Phone ??
+        item.mobile ??
+        item.Mobile ??
+        item.pharmacyPhoneNumber ??
+        item.PharmacyPhoneNumber ??
+        nestedPharmacy.phone ??
+        nestedPharmacy.Phone ??
+        nestedPharmacy.phoneNumber ??
+        nestedPharmacy.PhoneNumber ??
+        "",
+    ),
+    workingHours,
+    latitude: toSafeNumber(
+      item.latitude ??
+        item.Latitude ??
+        item.lat ??
+        item.Lat ??
+        nestedLocation.latitude ??
+        nestedLocation.Latitude ??
+        nestedLocation.lat ??
+        nestedLocation.Lat ??
+        nestedPharmacy.latitude ??
+        nestedPharmacy.Latitude,
+    ),
+    longitude: toSafeNumber(
+      item.longitude ??
+        item.Longitude ??
+        item.lng ??
+        item.Lng ??
+        item.long ??
+        item.Long ??
+        nestedLocation.longitude ??
+        nestedLocation.Longitude ??
+        nestedLocation.lng ??
+        nestedLocation.Lng ??
+        nestedPharmacy.longitude ??
+        nestedPharmacy.Longitude,
+    ),
+    distanceFromPatient: toSafeNumber(
+      item.distanceFromPatient ??
+        item.DistanceFromPatient ??
+        item.distanceInKm ??
+        item.DistanceInKm ??
+        item.distance ??
+        item.Distance,
+    ),
+  };
+}
+
+function needsNearbyPharmacyEnrichment(pharmacy: NearbyPharmacy): boolean {
+  const missingTextDetails =
+    !pharmacy.address.trim() ||
+    !pharmacy.phoneNumber.trim() ||
+    !pharmacy.workingHours.trim();
+  const missingCoordinates =
+    !Number.isFinite(pharmacy.latitude) ||
+    !Number.isFinite(pharmacy.longitude) ||
+    (pharmacy.latitude === 0 && pharmacy.longitude === 0);
+
+  return missingTextDetails || missingCoordinates;
+}
+
+async function enrichNearbyPharmacyDetails(
+  pharmacy: NearbyPharmacy,
+): Promise<NearbyPharmacy> {
+  const normalizedId = toBackendPositiveInt(pharmacy.id);
+  if (!normalizedId) return pharmacy;
+
+  try {
+    const detailsRes = await apiCall<unknown>(
+      `/api/Pharmacy/Get-Pharmacy-Details/${normalizedId}`,
+      { method: "GET" },
+    );
+
+    const details = mapBackendPharmacy(detailsRes.data);
+    const fallbackWorkingHours =
+      buildWorkingHoursFromPharmacyData(details).trim() ||
+      (details.openingTime || details.closingTime
+        ? [details.openingTime, details.closingTime].filter(Boolean).join(" - ")
+        : "");
+
+    return {
+      ...pharmacy,
+      id: pharmacy.id || details.id || String(normalizedId),
+      pharmacyName: pharmacy.pharmacyName || details.name || "Unknown Pharmacy",
+      address: pharmacy.address || details.address || "",
+      phoneNumber: pharmacy.phoneNumber || details.phone || "",
+      workingHours: pharmacy.workingHours || fallbackWorkingHours,
+      latitude:
+        pharmacy.latitude !== 0
+          ? pharmacy.latitude
+          : toSafeNumber(details.latitude),
+      longitude:
+        pharmacy.longitude !== 0
+          ? pharmacy.longitude
+          : toSafeNumber(details.longitude),
+    };
+  } catch (error) {
+    console.warn(
+      "[enrichNearbyPharmacyDetails] Failed to fetch pharmacy details for id",
+      pharmacy.id,
+      error,
+    );
+    return pharmacy;
+  }
+}
+
+/**
+ * ⚠️ TODO (Menna): تأكدي من اسم الـ endpoint الحقيقي من الـ Swagger بتاعك،
+ * ده افتراض بس إن فيه GET endpoint بياخد medicineId + latitude + longitude
+ * كـ query params ويرجّع الصيدليات اللي عندها الدواء متوفر بس، مرتبة من الأقرب.
+ * لو الاسم مختلف، غيّري السطر ده بس ومفيش حاجة تانية هتتأثر.
+ */
+const PHARMACY_FINDER_ENDPOINT = "/api/PharmacySearch/available-pharmacies";
+
+export const pharmacyFinderService = {
+  async resolveCatalogMedicineId(params: {
+    medicineId?: string | null;
+    medicineName?: string | null;
+  }): Promise<string | null> {
+    const directId = toBackendPositiveInt(params.medicineId);
+    if (directId) return String(directId);
+
+    const nameVariants = buildMedicineLookupNameVariants(params.medicineName);
+    if (nameVariants.length === 0) return null;
+
+    const index = await getPharmacyMedicineLookupIndex();
+
+    for (const variant of nameVariants) {
+      const exact = index.get(variant);
+      if (exact) return exact;
+    }
+
+    const nameTokens = nameVariants[0].split(" ").filter(Boolean);
+    if (nameTokens.length > 0) {
+      for (const [candidateName, id] of index.entries()) {
+        const isPartialMatch = nameTokens.every(
+          (token) => token.length > 2 && candidateName.includes(token),
+        );
+        if (isPartialMatch) return id;
+      }
+    }
+
+    return null;
+  },
+
+  /**
+   * Find pharmacies that currently stock a given medicine, sorted by distance.
+   * GET {PHARMACY_FINDER_ENDPOINT}?medicineId=&latitude=&longitude=
+   */
+  async findNearbyPharmacies(params: {
+    medicineId: string;
+    medicineName?: string;
+    latitude: number;
+    longitude: number;
+  }): Promise<ApiResponse<NearbyPharmacy[]>> {
+    try {
+      const resolvedMedicineId = await this.resolveCatalogMedicineId({
+        medicineId: params.medicineId,
+        medicineName: params.medicineName,
+      });
+      if (!resolvedMedicineId) {
+        throw new Error(
+          "Unable to resolve medicine ID from prescription. Please contact support.",
+        );
+      }
+
+      const query = new URLSearchParams({
+        medicineId: resolvedMedicineId,
+        latitude: String(params.latitude),
+        longitude: String(params.longitude),
+      });
+
+      const res = await apiCall<unknown>(
+        `${PHARMACY_FINDER_ENDPOINT}?${query.toString()}`,
+        { method: "GET" },
+      );
+
+      const list = extractApiArray(res.data);
+      const mapped = list
+        .map(mapBackendNearbyPharmacy)
+        .filter((pharmacy) => pharmacy.id);
+
+      const hydrated = await Promise.all(
+        mapped.map(async (pharmacy) => {
+          if (!needsNearbyPharmacyEnrichment(pharmacy)) return pharmacy;
+          return enrichNearbyPharmacyDetails(pharmacy);
+        }),
+      );
+
+      const pharmacies = hydrated
+        // دفاعياً بس - الـ backend المفروض بيرتبهم، بس مش هنثق في الـ order أعمى
+        .sort((a, b) => a.distanceFromPatient - b.distanceFromPatient);
+
+      return { data: pharmacies, success: true };
+    } catch (error) {
+      console.error(
+        "[pharmacyFinderService.findNearbyPharmacies] Error:",
+        error,
+      );
+      return {
+        data: [],
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Failed to find nearby pharmacies",
       };
     }
   },

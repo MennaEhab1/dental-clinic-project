@@ -155,10 +155,12 @@ export interface Prescription {
 export interface PrescriptionMedication {
   medicineId: string;
   medicine?: Medicine;
+  quantity?: number | null;
   dosage: string;
   frequency: string;
   duration: string;
   notes?: string;
+  catalogMedicineId?: string | null; // الـ ID الحقيقي من كتالوج الأدوية - يُستخدم للبحث عن الصيدليات
 }
 
 export interface Medicine {

@@ -47,27 +47,7 @@ import {
 import { toast } from "@/hooks/use-toast";
 import type { Medicine } from "@/types";
 
-// Map picker — React Leaflet + OpenStreetMap (no Google Maps dependency)
-import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
-import markerIcon from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-
-// Leaflet's default marker icon paths break under bundlers (Vite/webpack)
-// because they're resolved relative to the CSS, not the JS module — this
-// re-points them at the bundled asset URLs. Safe to run once at module load.
-delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })
-  ._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: markerIcon2x,
-  iconUrl: markerIcon,
-  shadowUrl: markerShadow,
-});
-
-// Fallback centers when a pharmacy has no coordinates yet.
-const TANTA_COORDS: [number, number] = [30.7865, 31.0004];
+import { PharmacyLocationPicker } from "@/components/pharmacy/PharmacyLocationPicker";
 
 type PharmacyFormState = {
   name: string;
@@ -79,86 +59,6 @@ type PharmacyFormState = {
   latitude: number | null;
   longitude: number | null;
 };
-
-/**
- * Click-to-place marker layer. Kept as its own component because
- * useMapEvents must be called from a component rendered inside MapContainer.
- */
-function LocationClickHandler({
-  onSelect,
-}: {
-  onSelect: (lat: number, lng: number) => void;
-}) {
-  useMapEvents({
-    click(e) {
-      onSelect(e.latlng.lat, e.latlng.lng);
-    },
-  });
-  return null;
-}
-
-/**
- * Interactive OpenStreetMap picker for a pharmacy's location.
- * - Centers on the pharmacy's existing coordinates when editing.
- * - Otherwise falls back to Tanta, Egypt with no marker (per backward-compat
- *   requirement — pharmacies created before this feature existed).
- * - Clicking the map moves/creates the marker and reports lat/lng up.
- */
-function PharmacyLocationPicker({
-  mapKey,
-  latitude,
-  longitude,
-  onChange,
-}: {
-  mapKey: string;
-  latitude: number | null;
-  longitude: number | null;
-  onChange: (lat: number, lng: number) => void;
-}) {
-  const hasCoords = latitude !== null && longitude !== null;
-  // Computed once at mount (the dialog remounts its content each time it
-  // opens), so this reflects whichever pharmacy is being edited/added.
-  const initialCenter: [number, number] = hasCoords
-    ? [latitude as number, longitude as number]
-    : TANTA_COORDS;
-
-  return (
-    <div className="space-y-2">
-      <Label>Location</Label>
-      <div className="rounded-lg overflow-hidden border border-border h-56">
-        <MapContainer
-          key={mapKey}
-          center={initialCenter}
-          zoom={hasCoords ? 15 : 12}
-          scrollWheelZoom={false}
-          className="h-full w-full"
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <LocationClickHandler onSelect={onChange} />
-          {hasCoords && (
-            <Marker position={[latitude as number, longitude as number]} />
-          )}
-        </MapContainer>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Click anywhere on the map to set the pharmacy&apos;s location.
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Latitude</Label>
-          <Input value={latitude ?? ""} readOnly placeholder="Not set" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Longitude</Label>
-          <Input value={longitude ?? ""} readOnly placeholder="Not set" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type MedicineFormState = {
   medicineId: string;
@@ -1041,13 +941,13 @@ export default function AdminPharmacy() {
 
         {/* Pharmacy Create/Edit Dialog */}
         <Dialog open={pharmacyDialogOpen} onOpenChange={setPharmacyDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[90vh] px-4 py-7">
             <DialogHeader>
               <DialogTitle className="font-display">
                 {editingPharmacy ? "Edit Pharmacy" : "Add Pharmacy"}
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="space-y-2">
                 <Label>Pharmacy Name</Label>
                 <Input
@@ -1124,11 +1024,12 @@ export default function AdminPharmacy() {
                 mapKey={editingPharmacy?.id ?? "new"}
                 latitude={pharmacyForm.latitude}
                 longitude={pharmacyForm.longitude}
-                onChange={(lat, lng) =>
+                onLocationChange={(lat, lng, address) =>
                   setPharmacyForm((f) => ({
                     ...f,
                     latitude: lat,
                     longitude: lng,
+                    address: address ?? f.address,
                   }))
                 }
               />
@@ -1160,13 +1061,13 @@ export default function AdminPharmacy() {
 
         {/* Pharmacy Medicine Create/Edit Dialog */}
         <Dialog open={medicineDialogOpen} onOpenChange={setMedicineDialogOpen}>
-          <DialogContent className="max-w-sm">
+          <DialogContent className="max-w-sm max-h-[90vh] px-4 py-7">
             <DialogHeader>
               <DialogTitle className="font-display">
                 {editingMedicine ? "Edit Medicine" : "Add Medicine"}
               </DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {editingMedicine ? (
                 <p className="font-medium text-foreground">
                   {editingMedicine.medicineName}
@@ -1274,7 +1175,7 @@ export default function AdminPharmacy() {
                   />
                 </div>
               )}
-              <div className="flex gap-2 pt-2">
+              <div className="sticky bottom-0 bg-background pt-4 flex gap-2">
                 <Button
                   className="w-full gradient-bg border-0"
                   onClick={saveMedicine}

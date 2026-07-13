@@ -1,3 +1,4 @@
+//PatientPrescriptions
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -21,7 +22,9 @@ import {
   Calendar,
   ChevronRight,
   FileText,
+  Store,
 } from "lucide-react";
+import { PharmacyFinderDialog } from "@/components/pharmacy-finder/PharmacyFinderDialog";
 import type {
   Appointment,
   Doctor,
@@ -32,6 +35,7 @@ import type { PrescriptionDetailsDTO } from "@/types/swagger";
 import {
   appointmentService,
   doctorService,
+  pharmacyService,
   prescriptionService,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -97,10 +101,46 @@ function getAppointmentFromMap(
   );
 }
 
+function normalizeMedicineName(value: unknown): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractMedicinePrice(raw: Record<string, unknown>): number | null {
+  const value =
+    raw.price ??
+    raw.Price ??
+    raw.unitPrice ??
+    raw.UnitPrice ??
+    raw.medicinePrice ??
+    raw.MedicinePrice ??
+    null;
+
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function extractMedicineQuantity(raw: Record<string, unknown>): number | null {
+  const value = raw.quantity ?? raw.Quantity ?? raw.qty ?? raw.Qty ?? null;
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function extractMedicineUnit(raw: Record<string, unknown>): string {
+  return String(raw.unit ?? raw.Unit ?? "").trim();
+}
+
 function mapPrescriptionDtoToEnhanced(
   dto: PrescriptionDetailsDTO,
   appointmentsById: Map<string, Appointment>,
   doctorsById: Map<string, Doctor>,
+  medicinesById: Map<string, { price: number; unit: string }>,
+  medicinesByName: Map<string, { price: number; unit: string }>,
 ): EnhancedPrescription {
   const appointmentId = extractAppointmentIdFromPrescription(dto);
   const appointment = getAppointmentFromMap(appointmentsById, appointmentId);
@@ -123,26 +163,50 @@ function mapPrescriptionDtoToEnhanced(
 
   const medicines = dto.medicines || [];
   const medications: PrescriptionMedication[] = medicines.map(
-    (medicine, index) => ({
-      medicineId: `prescription-${dto.prescriptionId || appointmentId || "unknown"}-medicine-${index}`,
-      medicine: {
-        id: `medicine-${dto.prescriptionId || appointmentId || "unknown"}-${index}`,
-        name: medicine.medicineName || "Medicine",
-        genericName: medicine.medicineName || "Medicine",
-        category: "prescription",
-        manufacturer: "",
-        price: 0,
-        stock: 0,
-        unit: "",
-        description: "",
-      },
-      dosage: medicine.dosage || "",
-      frequency: medicine.frequency || "",
-      duration: medicine.durationInDays
-        ? `${medicine.durationInDays} day(s)`
-        : "",
-      notes: medicine.instructions || undefined,
-    }),
+    (medicine, index) => {
+      const rawMedicine = medicine as unknown as Record<string, unknown>;
+      const catalogMedicineId = extractCatalogMedicineId(rawMedicine);
+      const nameKey = normalizeMedicineName(medicine.medicineName || "");
+
+      const catalogById = catalogMedicineId
+        ? medicinesById.get(normalizeLookupKey(catalogMedicineId))
+        : undefined;
+      const catalogByName = nameKey ? medicinesByName.get(nameKey) : undefined;
+
+      const medicinePrice =
+        extractMedicinePrice(rawMedicine) ??
+        catalogById?.price ??
+        catalogByName?.price ??
+        0;
+      const medicineUnit =
+        extractMedicineUnit(rawMedicine) ||
+        catalogById?.unit ||
+        catalogByName?.unit ||
+        "";
+
+      return {
+        medicineId: `prescription-${dto.prescriptionId || appointmentId || "unknown"}-medicine-${index}`,
+        catalogMedicineId,
+        medicine: {
+          id: `medicine-${dto.prescriptionId || appointmentId || "unknown"}-${index}`,
+          name: medicine.medicineName || "Medicine",
+          genericName: medicine.medicineName || "Medicine",
+          category: "prescription",
+          manufacturer: "",
+          price: medicinePrice,
+          stock: 0,
+          unit: medicineUnit,
+          description: "",
+        },
+        quantity: extractMedicineQuantity(rawMedicine),
+        dosage: medicine.dosage || "",
+        frequency: medicine.frequency || "",
+        duration: medicine.durationInDays
+          ? `${medicine.durationInDays} day(s)`
+          : "",
+        notes: medicine.instructions || undefined,
+      };
+    },
   );
 
   const instructions = medicines
@@ -177,6 +241,22 @@ function mapPrescriptionDtoToEnhanced(
   };
 }
 
+// ضيفي الدالة دي فوق mapPrescriptionDtoToEnhanced
+function extractCatalogMedicineId(
+  medicine: Record<string, unknown>,
+): string | null {
+  const raw =
+    medicine.medicineId ??
+    medicine.MedicineId ??
+    medicine.medicineID ??
+    medicine.MedicineID ??
+    medicine.catalogMedicineId ??
+    null;
+  if (raw === null || raw === undefined) return null;
+  const str = String(raw).trim();
+  return str && !Number.isNaN(Number(str)) ? str : null;
+}
+
 export default function PatientPrescriptions() {
   const [prescriptions, setPrescriptions] = useState<EnhancedPrescription[]>(
     [],
@@ -186,17 +266,22 @@ export default function PatientPrescriptions() {
     useState<EnhancedPrescription | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const { user } = useAuth();
-
+  const [pharmacyFinderMedicine, setPharmacyFinderMedicine] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   useEffect(() => {
     const fetchPrescriptions = async () => {
       try {
         setIsLoading(true);
 
-        const [result, appointmentsResult, doctorsResult] = await Promise.all([
-          prescriptionService.getMyPrescriptions(),
-          appointmentService.getByPatient(),
-          doctorService.getAll(),
-        ]);
+        const [result, appointmentsResult, doctorsResult, medicinesResult] =
+          await Promise.all([
+            prescriptionService.getMyPrescriptions(),
+            appointmentService.getByPatient(),
+            doctorService.getAll(),
+            pharmacyService.getAll(),
+          ]);
 
         if (result.success && result.data && Array.isArray(result.data)) {
           const appointmentsById = new Map<string, Appointment>();
@@ -218,6 +303,41 @@ export default function PatientPrescriptions() {
             if (key) doctorsById.set(key, doctor);
           });
 
+          const medicinesById = new Map<
+            string,
+            { price: number; unit: string }
+          >();
+          const medicinesByName = new Map<
+            string,
+            { price: number; unit: string }
+          >();
+
+          (medicinesResult.data || []).forEach((medicine) => {
+            const idKey = normalizeLookupKey(medicine.id);
+            if (idKey && !medicinesById.has(idKey)) {
+              medicinesById.set(idKey, {
+                price: Number(medicine.price || 0),
+                unit: String(medicine.unit || "").trim(),
+              });
+            }
+
+            const nameKey = normalizeMedicineName(medicine.name);
+            if (nameKey && !medicinesByName.has(nameKey)) {
+              medicinesByName.set(nameKey, {
+                price: Number(medicine.price || 0),
+                unit: String(medicine.unit || "").trim(),
+              });
+            }
+
+            const genericKey = normalizeMedicineName(medicine.genericName);
+            if (genericKey && !medicinesByName.has(genericKey)) {
+              medicinesByName.set(genericKey, {
+                price: Number(medicine.price || 0),
+                unit: String(medicine.unit || "").trim(),
+              });
+            }
+          });
+
           const prescriptionsByAppointment = new Map<
             string,
             EnhancedPrescription
@@ -231,6 +351,8 @@ export default function PatientPrescriptions() {
               dto,
               appointmentsById,
               doctorsById,
+              medicinesById,
+              medicinesByName,
             );
             prescriptionsByAppointment.set(appointmentId, mapped);
           });
@@ -252,6 +374,8 @@ export default function PatientPrescriptions() {
                     byAppointment.data,
                     appointmentsById,
                     doctorsById,
+                    medicinesById,
+                    medicinesByName,
                   );
                   prescriptionsByAppointment.set(
                     String(appointment.id),
@@ -359,10 +483,10 @@ export default function PatientPrescriptions() {
               >
                 <Card className="hover:shadow-lg transition-shadow group cursor-pointer">
                   <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
                       {/* Left Side - Doctor Info */}
                       <div className="flex items-start gap-3 flex-1">
-                        <Avatar className="h-12 w-12 mt-1">
+                        <Avatar className="h-12 w-12 mt-1 shrink-0">
                           <AvatarImage src={prescription.doctorAvatar} />
                           <AvatarFallback>
                             {prescription.doctorName?.[0]}
@@ -370,7 +494,7 @@ export default function PatientPrescriptions() {
                           </AvatarFallback>
                         </Avatar>
 
-                        <div className="flex-1">
+                        <div className="flex-1 min-w-0">
                           <div className="mb-1">
                             <h3 className="font-semibold text-gray-900 dark:text-white">
                               {prescription.doctorName
@@ -385,19 +509,19 @@ export default function PatientPrescriptions() {
 
                           <div className="flex flex-wrap gap-3 text-sm text-gray-600 dark:text-gray-400 mt-2">
                             <div className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
+                              <Calendar className="w-4 h-4 shrink-0" />
                               {new Date(
                                 prescription.createdAt,
                               ).toLocaleDateString()}
                             </div>
                             <div className="flex items-center gap-1">
-                              <Pill className="w-4 h-4" />
+                              <Pill className="w-4 h-4 shrink-0" />
                               {prescription.medications?.length || 0}{" "}
                               medications
                             </div>
                             {prescription.appointmentService && (
                               <div className="flex items-center gap-1">
-                                <FileText className="w-4 h-4" />
+                                <FileText className="w-4 h-4 shrink-0" />
                                 {prescription.appointmentService}
                               </div>
                             )}
@@ -406,12 +530,12 @@ export default function PatientPrescriptions() {
                       </div>
 
                       {/* Right Side - Actions */}
-                      <div className="flex gap-2 flex-col">
+                      <div className="flex gap-2 w-full sm:w-auto">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handleViewDetails(prescription)}
-                          className="gap-2 group-hover:bg-gray-100 dark:group-hover:bg-gray-800"
+                          className="gap-2 group-hover:bg-gray-100 dark:group-hover:bg-gray-800 w-full sm:w-auto"
                         >
                           View Details
                           <ChevronRight className="w-4 h-4" />
@@ -428,24 +552,24 @@ export default function PatientPrescriptions() {
 
       {/* Prescription Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl h-[90vh] p-0 overflow-hidden">
+          <DialogHeader className="px-6 py-4 border-b shrink-0">
             <DialogTitle>Prescription Details</DialogTitle>
           </DialogHeader>
 
           {selectedPrescription && (
-            <ScrollArea className="h-full pr-4">
+            <ScrollArea className="flex-1 px-6 py-5 min-h-0">
               <div className="space-y-6">
                 {/* Header */}
-                <div className="flex items-start gap-4 pb-4 border-b">
-                  <Avatar className="h-16 w-16">
+                <div className="flex flex-col sm:flex-row items-start gap-4 pb-4 border-b">
+                  <Avatar className="h-16 w-16 shrink-0">
                     <AvatarImage src={selectedPrescription.doctorAvatar} />
                     <AvatarFallback>
                       {selectedPrescription.doctorName?.[0]}
                       {selectedPrescription.doctorName?.split(" ")[1]?.[0]}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
                       {selectedPrescription.doctorName
                         ? `Dr. ${selectedPrescription.doctorName}`
@@ -454,7 +578,7 @@ export default function PatientPrescriptions() {
                     <p className="text-sm text-gray-600 dark:text-gray-400">
                       {selectedPrescription.doctorSpecialty}
                     </p>
-                    <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500 mt-2">
                       <span>
                         Prescribed:{" "}
                         {new Date(
@@ -508,8 +632,8 @@ export default function PatientPrescriptions() {
                                   </p>
                                 </div>
 
-                                {/* Usage Details */}
-                                <div className="grid grid-cols-3 gap-3 text-sm">
+                                {/* Usage Details - Responsive Grid */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
                                   <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded">
                                     <p className="text-xs font-semibold text-gray-500 uppercase">
                                       Dosage
@@ -534,9 +658,16 @@ export default function PatientPrescriptions() {
                                       {med.duration}
                                     </p>
                                   </div>
+                                  <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded">
+                                    <p className="text-xs font-semibold text-gray-500 uppercase">
+                                      Quantity
+                                    </p>
+                                    <p className="text-gray-900 dark:text-white font-medium mt-1">
+                                      {med.quantity ?? "N/A"}
+                                    </p>
+                                  </div>
                                 </div>
 
-                                {/* Notes */}
                                 {med.notes && (
                                   <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3 rounded flex gap-2">
                                     <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -545,6 +676,30 @@ export default function PatientPrescriptions() {
                                     </p>
                                   </div>
                                 )}
+
+                                <div className="pt-1">
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="gap-2"
+                                    onClick={() =>
+                                      setPharmacyFinderMedicine({
+                                        id: med.catalogMedicineId || "",
+                                        name:
+                                          med.medicine?.name || "this medicine",
+                                      })
+                                    }
+                                  >
+                                    <Store className="w-4 h-4" />
+                                    Find Available Pharmacies
+                                  </Button>
+                                  {!med.catalogMedicineId && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      Medicine ID is missing in prescription
+                                      data. We will match by medicine name.
+                                    </p>
+                                  )}
+                                </div>
 
                                 {med.medicine?.sideEffects &&
                                   med.medicine.sideEffects.length > 0 && (
@@ -610,6 +765,16 @@ export default function PatientPrescriptions() {
             </ScrollArea>
           )}
         </DialogContent>
+        {pharmacyFinderMedicine && (
+          <PharmacyFinderDialog
+            open={Boolean(pharmacyFinderMedicine)}
+            onOpenChange={(isOpen) => {
+              if (!isOpen) setPharmacyFinderMedicine(null);
+            }}
+            medicineId={pharmacyFinderMedicine.id}
+            medicineName={pharmacyFinderMedicine.name}
+          />
+        )}
       </Dialog>
     </DashboardLayout>
   );

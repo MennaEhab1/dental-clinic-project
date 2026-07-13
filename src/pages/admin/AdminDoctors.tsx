@@ -1134,134 +1134,200 @@ export default function AdminDoctors() {
     }
   };
 
-  // const handleDelete = async (id: string) => {
-  //   if (!confirm("Are you sure you want to delete this doctor?")) return;
-
-  //   try {
-  //     await adminDoctorService.delete(id);
-  //     setDoctors((prev) => prev.filter((d) => d.id !== id));
-  //     toast({ title: "Success", description: "Doctor deleted successfully" });
-  //   } catch (error) {
-  //     console.error("Failed to delete doctor:", error);
-  //     const errorMessage = error instanceof Error ? error.message : "";
-  //     const hasAppointments =
-  //       errorMessage.toLowerCase().includes("upcoming appointments") ||
-  //       errorMessage.toLowerCase().includes("appointments are finished");
-
-  //     toast({
-  //       title: hasAppointments ? "Cannot Delete Doctor" : "Error",
-  //       description: hasAppointments
-  //         ? "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting."
-  //         : "Failed to delete doctor",
-  //       variant: "destructive",
-  //     });
-  //   }
-  // };
-
-
   const handleDelete = async (id: string) => {
-  if (!confirm("Are you sure you want to delete this doctor?")) return;
+    if (!confirm("Are you sure you want to delete this doctor?")) return;
 
-  try {
-    await adminDoctorService.delete(id);
-    setDoctors((prev) => prev.filter((d) => d.id !== id));
-    toast({ title: "Success", description: "Doctor deleted successfully" });
-  } catch (error) {
-    console.error("Failed to delete doctor:", error);
-    toast({
-      title: "Cannot Delete Doctor",
-      description: "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting.",
-      variant: "destructive",
-    });
-  }
-};
-  const handleToggleStatus = async (doctor: Doctor) => {
-    const isCurrentlyActive = doctor.isActive !== false;
+    try {
+      await adminDoctorService.delete(id);
+      setDoctors((prev) => prev.filter((d) => d.id !== id));
+      toast({ title: "Success", description: "Doctor deleted successfully" });
+    } catch (error) {
+      console.error("Failed to delete doctor:", error);
+      const errorMessage = error instanceof Error ? error.message : "";
+      const hasAppointments =
+        errorMessage.toLowerCase().includes("upcoming appointments") ||
+        errorMessage.toLowerCase().includes("appointments are finished");
 
-    if (isCurrentlyActive) {
-      try {
-        await adminDoctorService.toggleStatus(doctor.id);
-        setDoctors((prev) =>
-          prev.map((d) =>
-            d.id === doctor.id ? { ...d, isActive: false } : d,
-          ),
-        );
-        toast({ title: "Success", description: "Doctor deactivated successfully" });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "";
-        const hasAppointments =
-          errorMessage.toLowerCase().includes("upcoming appointments") ||
-          errorMessage.toLowerCase().includes("cancelappointments");
-
-        if (hasAppointments) {
-          const countMatch = errorMessage.match(/has (\d+) upcoming/);
-          const count = countMatch ? countMatch[1] : "some";
-
-          const confirmed = confirm(
-            `This doctor has ${count} upcoming appointment(s). Do you want to cancel them and deactivate the doctor?`
-          );
-
-          if (confirmed) {
-            try {
-              const token = localStorage.getItem("auth_token");
-              const res = await fetch(
-                `https://smart-teeth-care.runasp.net/api/admin/doctors/toggle-status/${doctor.id}?cancelAppointments=true`,
-                {
-                  method: "PUT",
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                  },
-                }
-              );
-
-              if (!res.ok) {
-                throw new Error("Failed to deactivate doctor");
-              }
-
-              setDoctors((prev) =>
-                prev.map((d) =>
-                  d.id === doctor.id ? { ...d, isActive: false } : d,
-                ),
-              );
-              toast({
-                title: "Success",
-                description: "Doctor deactivated and appointments cancelled successfully",
-              });
-            } catch {
-              toast({
-                title: "Error",
-                description: "Failed to deactivate doctor",
-                variant: "destructive",
-              });
-            }
-          }
-        } else {
-          toast({
-            title: "Error",
-            description: "Failed to update doctor status",
-            variant: "destructive",
-          });
-        }
-      }
-    } else {
-      try {
-        await adminDoctorService.toggleStatus(doctor.id);
-        setDoctors((prev) =>
-          prev.map((d) =>
-            d.id === doctor.id ? { ...d, isActive: true } : d,
-          ),
-        );
-        toast({ title: "Success", description: "Doctor activated successfully" });
-      } catch {
-        toast({
-          title: "Error",
-          description: "Failed to activate doctor",
-          variant: "destructive",
-        });
-      }
+      toast({
+        title: hasAppointments ? "Cannot Delete Doctor" : "Error",
+        description: hasAppointments
+          ? "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting."
+          : "Failed to delete doctor",
+        variant: "destructive",
+      });
     }
   };
 
+
+
+  // const handleToggleStatus = async (doctor: Doctor) => {
+  //   const isCurrentlyActive = doctor.isActive !== false;
+
+  //   if (isCurrentlyActive) {
+  //     try {
+  //       await adminDoctorService.toggleStatus(doctor.id);
+  //       setDoctors((prev) =>
+  //         prev.map((d) =>
+  //           d.id === doctor.id ? { ...d, isActive: false } : d,
+  //         ),
+  //       );
+  //       toast({ title: "Success", description: "Doctor deactivated successfully" });
+  //     } catch (error) {
+  //       const errorMessage = error instanceof Error ? error.message : "";
+  //       const hasAppointments =
+  //         errorMessage.toLowerCase().includes("upcoming appointments") ||
+  //         errorMessage.toLowerCase().includes("cancelappointments");
+
+  //       if (hasAppointments) {
+  //         const countMatch = errorMessage.match(/has (\d+) upcoming/);
+  //         const count = countMatch ? countMatch[1] : "some";
+
+  //         const confirmed = confirm(
+  //           `This doctor has ${count} upcoming appointment(s). Do you want to cancel them and deactivate the doctor?`
+  //         );
+
+  //         if (confirmed) {
+  //           try {
+  //             const token = localStorage.getItem("auth_token");
+  //             const res = await fetch(
+  //               `https://smart-teeth-care.runasp.net/api/admin/doctors/toggle-status/${doctor.id}?cancelAppointments=true`,
+  //               {
+  //                 method: "PUT",
+  //                 headers: {
+  //                   Authorization: `Bearer ${token}`,
+  //                 },
+  //               }
+  //             );
+
+  //             if (!res.ok) {
+  //               throw new Error("Failed to deactivate doctor");
+  //             }
+
+  //             setDoctors((prev) =>
+  //               prev.map((d) =>
+  //                 d.id === doctor.id ? { ...d, isActive: false } : d,
+  //               ),
+  //             );
+  //             toast({
+  //               title: "Success",
+  //               description: "Doctor deactivated and appointments cancelled successfully",
+  //             });
+  //           } catch {
+  //             toast({
+  //               title: "Error",
+  //               description: "Failed to deactivate doctor",
+  //               variant: "destructive",
+  //             });
+  //           }
+  //         }
+  //       } else {
+  //         toast({
+  //           title: "Error",
+  //           description: "Failed to update doctor status",
+  //           variant: "destructive",
+  //         });
+  //       }
+  //     }
+  //   } else {
+  //     try {
+  //       await adminDoctorService.toggleStatus(doctor.id);
+  //       setDoctors((prev) =>
+  //         prev.map((d) =>
+  //           d.id === doctor.id ? { ...d, isActive: true } : d,
+  //         ),
+  //       );
+  //       toast({ title: "Success", description: "Doctor activated successfully" });
+  //     } catch {
+  //       toast({
+  //         title: "Error",
+  //         description: "Failed to activate doctor",
+  //         variant: "destructive",
+  //       });
+  //     }
+  //   }
+  // };
+const handleToggleStatus = async (doctor: Doctor) => {
+  const isCurrentlyActive = doctor.isActive !== false;
+
+  if (isCurrentlyActive) {
+    // ✅ اسأل المستخدم أولاً قبل ما نبعت أي request
+    const hasAppointmentsChoice = confirm(
+      `Do you want to cancel this doctor's upcoming appointments and deactivate them?\n\nClick OK to cancel appointments and deactivate.\nClick Cancel to deactivate only if no appointments exist.`
+    );
+
+    if (hasAppointmentsChoice) {
+      // بعت مع cancelAppointments=true مباشرة
+      try {
+        const token = localStorage.getItem("auth_token");
+        const res = await fetch(
+          `https://smart-teeth-care.runasp.net/api/admin/doctors/toggle-status/${doctor.id}?cancelAppointments=true`,
+          {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        if (!res.ok) throw new Error("Failed");
+        setDoctors((prev) =>
+          prev.map((d) => d.id === doctor.id ? { ...d, isActive: false } : d)
+        );
+        toast({ title: "Success", description: "Doctor deactivated and appointments cancelled successfully" });
+      } catch {
+        toast({ title: "Error", description: "Failed to deactivate doctor", variant: "destructive" });
+      }
+    } else {
+      // بعت بدون cancelAppointments - لو مفيش مواعيد هيتعمل deactivate
+      try {
+        const token = localStorage.getItem("auth_token");
+        const res = await fetch(
+          `https://smart-teeth-care.runasp.net/api/admin/doctors/toggle-status/${doctor.id}?cancelAppointments=false`,
+          {
+            method: "PUT",
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
+        if (!res.ok) {
+          const data = await res.json();
+          const msg = data?.message || "";
+          if (msg.toLowerCase().includes("upcoming appointments") || msg.toLowerCase().includes("cancelappointments")) {
+            toast({
+              title: "Cannot Deactivate",
+              description: "This doctor has upcoming appointments. Please cancel them first or choose to cancel them when deactivating.",
+              variant: "destructive",
+            });
+          } else {
+            toast({ title: "Error", description: "Failed to deactivate doctor", variant: "destructive" });
+          }
+          return;
+        }
+        setDoctors((prev) =>
+          prev.map((d) => d.id === doctor.id ? { ...d, isActive: false } : d)
+        );
+        toast({ title: "Success", description: "Doctor deactivated successfully" });
+      } catch {
+        toast({ title: "Error", description: "Failed to deactivate doctor", variant: "destructive" });
+      }
+    }
+  } else {
+    // Activate
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch(
+        `https://smart-teeth-care.runasp.net/api/admin/doctors/toggle-status/${doctor.id}`,
+        {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!res.ok) throw new Error("Failed");
+      setDoctors((prev) =>
+        prev.map((d) => d.id === doctor.id ? { ...d, isActive: true } : d)
+      );
+      toast({ title: "Success", description: "Doctor activated successfully" });
+    } catch {
+      toast({ title: "Error", description: "Failed to activate doctor", variant: "destructive" });
+    }
+  }
+};
   return (
     <DashboardLayout role="admin">
       <div className="space-y-6">

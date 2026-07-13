@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { DoctorCard } from "@/components/doctors/DoctorCard";
 import { ServiceCard } from "@/components/services/ServiceCard";
+import { PublicChatWidget } from "@/components/ai/PublicChatWidget";
 import {
   Calendar,
   Shield,
@@ -479,6 +480,8 @@ export default function LandingPage() {
           </motion.div>
         </div>
       </section>
+            <PublicChatWidget />
+
     </MainLayout>
   );
 }

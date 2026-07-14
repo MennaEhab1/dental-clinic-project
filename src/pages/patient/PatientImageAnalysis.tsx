@@ -1,22 +1,25 @@
-import { useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { DashboardLayout } from '@/components/layout/DashboardLayout';
-import { ImageUpload } from '@/components/ai/ImageUpload';
-import { CameraCapture } from '@/components/ai/CameraCapture';
-import { AnalysisResultBox } from '@/components/ai/AnalysisResultBox';
-import { AIChatWidget } from '@/components/ai/AIChatWidget';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, Camera, Sparkles, RotateCcw, ShieldCheck } from 'lucide-react';
-import { analyzeImage, type AnalysisResponse } from '@/services/aiAnalysisService';
+import { useState, useCallback } from "react";
+import { motion } from "framer-motion";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { ImageUpload } from "@/components/ai/ImageUpload";
+import { CameraCapture } from "@/components/ai/CameraCapture";
+import { AnalysisResultBox } from "@/components/ai/AnalysisResultBox";
+import { AIChatWidget } from "@/components/ai/AIChatWidget";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Upload, Camera, Sparkles, RotateCcw, ShieldCheck } from "lucide-react";
+import {
+  analyzeImage,
+  type AnalysisResponse,
+} from "@/services/aiAnalysisService";
 
 export default function PatientImageAnalysis() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
-  const [activeTab, setActiveTab] = useState('upload');
+  const [activeTab, setActiveTab] = useState("upload");
   const [showChat, setShowChat] = useState(false);
 
   const hasResults = (analysis?.results?.length ?? 0) > 0;
@@ -47,11 +50,11 @@ export default function PatientImageAnalysis() {
       setAnalysis(result);
       setShowChat(false);
     } catch (error) {
-      console.error('Analysis failed:', error);
+      console.error("Analysis failed:", error);
       setAnalysis({
-        disease: '',
+        disease: "",
         results: [],
-        summary: '❌ Failed to analyze image.',
+        summary: "❌ Failed to analyze image.",
         analyzedAt: new Date().toISOString(),
       });
       setShowChat(false);
@@ -70,7 +73,6 @@ export default function PatientImageAnalysis() {
   return (
     <DashboardLayout role="patient">
       <div className="max-w-3xl mx-auto space-y-6">
-
         {/* HERO */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -125,7 +127,7 @@ export default function PatientImageAnalysis() {
               <TabsContent value="camera">
                 <CameraCapture
                   onCapture={handleImageSelect}
-                  onClose={() => setActiveTab('upload')}
+                  onClose={() => setActiveTab("upload")}
                 />
               </TabsContent>
             </Tabs>
@@ -183,7 +185,6 @@ export default function PatientImageAnalysis() {
             </p>
           </CardContent>
         </Card>
-
       </div>
 
       {/* CHAT */}
@@ -194,7 +195,6 @@ export default function PatientImageAnalysis() {
           onClose={() => setShowChat(false)}
         />
       )}
-
     </DashboardLayout>
   );
 }

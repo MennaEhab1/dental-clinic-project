@@ -177,14 +177,22 @@ export default function RegisterPage() {
           className="sm:mx-auto sm:w-full sm:max-w-md"
         >
           <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-            <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-xl font-bold text-primary-foreground">
-                D
-              </span>
-            </div>
-            <span className="text-xl font-display font-bold text-foreground">
-              Dental<span className="gradient-text">Care</span>
-            </span>
+            <img
+              src="/public/LogoLunare.png"
+              alt="Lunare Logo"
+              className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+            />
           </Link>
 
           <div className="text-center mb-8">

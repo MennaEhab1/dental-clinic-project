@@ -146,14 +146,22 @@ export default function LoginPage() {
           className="sm:mx-auto sm:w-full sm:max-w-md"
         >
           <Link to="/" className="flex items-center justify-center gap-2 mb-8">
-            <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-              <span className="text-xl font-bold text-primary-foreground">
-                D
-              </span>
-            </div>
-            <span className="text-xl font-display font-bold text-foreground">
-              Dental<span className="gradient-text">Care</span>
-            </span>
+            <img
+              src="/public/LogoLunare.png"
+              alt="Lunare Logo"
+              className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+            />
           </Link>
 
           <div className="text-center mb-8">
@@ -243,7 +251,7 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-6">
+            {/* <div className="mt-6">
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <div className="w-full border-t border-border" />
@@ -261,7 +269,7 @@ export default function LoginPage() {
                   If login fails, verify the account first in Swagger.
                 </p>
               </div>
-            </div>
+            </div> */}
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
               Don't have an account?{" "}
@@ -325,7 +333,7 @@ export default function LoginPage() {
       {/* Right Side - Image */}
       <div className="hidden lg:block lg:w-1/2 relative">
         <img
-          src="https://images.unsplash.com/photo-1629909615957-be38d48fbbe4?w=1200&h=1600&fit=crop"
+          src="https://images.unsplash.com/photo-1600170311833-c2cf5280ce49?w=1200&h=1600&fit=crop"
           alt="Dental Care"
           className="absolute inset-0 w-full h-full object-cover"
         />

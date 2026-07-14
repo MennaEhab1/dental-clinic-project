@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { AppointmentCard } from "@/components/appointments/AppointmentCard";
+import { AppointmentCard } from "@/pages/appointments/AppointmentCard";
 import { AppointmentDetailsDrawer } from "@/components/dashboard/AppointmentDetailsDrawer";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
 import { NoAppointments } from "@/components/common/EmptyState";

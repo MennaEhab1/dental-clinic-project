@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Calendar, Users, Clock, ArrowRight } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { AppointmentCard } from "@/components/appointments/AppointmentCard";
+import { AppointmentCard } from "@/pages/appointments/AppointmentCard";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

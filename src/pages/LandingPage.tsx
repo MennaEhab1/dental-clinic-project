@@ -18,9 +18,9 @@ import {
 } from "lucide-react";
 import { doctorService, homeService, serviceService } from "@/services/api";
 import type { Doctor, HomeStatistics, HomeTopReview, Service } from "@/types";
-import ShinyText from "@/Motions/ShinyText";
-import CountUp from "@/Motions/CountUp";
-import StarBorder from "@/Motions/StarBorder";
+import ShinyText from "@/components/Motions/ShinyText";
+import CountUp from "@/components/Motions/CountUp";
+import StarBorder from "@/components/Motions/StarBorder";
 import BorderGlow from "./BorderGlow";
 
 const fadeInUp = {

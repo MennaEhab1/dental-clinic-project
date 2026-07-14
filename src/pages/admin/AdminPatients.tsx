@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -42,17 +36,49 @@ export default function AdminPatients() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedPatient, setSelectedPatient] = useState<AdminPatient | null>(null);
+  const [selectedPatient, setSelectedPatient] = useState<AdminPatient | null>(
+    null,
+  );
   const [dialogOpen, setDialogOpen] = useState(false);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(
+    null,
+  );
   const [formData, setFormData] = useState({
-  fullName: "",
-  email: "",
-  phoneNumber: "",
-  address: "",
-  gender: "",
-  dateOfBirth: "",
-});
+    fullName: "",
+    email: "",
+    phoneNumber: "",
+    address: "",
+    gender: "",
+    dateOfBirth: "",
+  });
+
+  const extractTemporaryPassword = (payload: unknown): string | null => {
+    if (!payload || typeof payload !== "object") return null;
+    const data = payload as Record<string, unknown>;
+    const direct =
+      data.temporaryPassword ??
+      data.tempPassword ??
+      data.password ??
+      data.generatedPassword;
+
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
+
+    const nested =
+      data.data && typeof data.data === "object"
+        ? (data.data as Record<string, unknown>)
+        : null;
+
+    const nestedValue =
+      nested?.temporaryPassword ??
+      nested?.tempPassword ??
+      nested?.password ??
+      nested?.generatedPassword;
+
+    return typeof nestedValue === "string" && nestedValue.trim()
+      ? nestedValue.trim()
+      : null;
+  };
   useEffect(() => {
     fetchPatients();
   }, []);
@@ -89,75 +115,81 @@ export default function AdminPatients() {
   };
 
   const handleAddPatient = async () => {
-  if (
-    !formData.fullName.trim() ||
-    !formData.email.trim() ||
-    !formData.phoneNumber.trim() ||
-    !formData.address.trim() ||
-    !formData.gender ||
-    !formData.dateOfBirth
-  ) {
-    toast({
-      title: "Error",
-      description: "Please fill all required fields",
-      variant: "destructive",
-    });
-    return;
-  }
-
-  setIsSubmitting(true);
-
-  try {
-    const res = await fetch(`${BASE_URL}/api/adminPatient`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getToken()}`,
-      },
-      body: JSON.stringify({
-        fullName: formData.fullName.trim(),
-        email: formData.email.trim(),
-        phoneNumber: formData.phoneNumber.trim(),
-        address: formData.address.trim(),
-        gender: formData.gender,
-        dateOfBirth: new Date(formData.dateOfBirth).toISOString(),
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.message || "Failed to add patient");
+    if (
+      !formData.fullName.trim() ||
+      !formData.email.trim() ||
+      !formData.phoneNumber.trim() ||
+      !formData.address.trim() ||
+      !formData.gender ||
+      !formData.dateOfBirth
+    ) {
+      toast({
+        title: "Error",
+        description: "Please fill all required fields",
+        variant: "destructive",
+      });
+      return;
     }
 
-    toast({
-      title: "Patient Added",
-      description: `Temporary Password: ${data.temporaryPassword}`,
-    });
+    setIsSubmitting(true);
 
-    setAddDialogOpen(false);
+    try {
+      const res = await fetch(`${BASE_URL}/api/adminPatient`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({
+          fullName: formData.fullName.trim(),
+          email: formData.email.trim(),
+          phoneNumber: formData.phoneNumber.trim(),
+          address: formData.address.trim(),
+          gender: formData.gender,
+          dateOfBirth: new Date(formData.dateOfBirth).toISOString(),
+        }),
+      });
 
-    setFormData({
-      fullName: "",
-      email: "",
-      phoneNumber: "",
-      address: "",
-      gender: "",
-      dateOfBirth: "",
-    });
+      const data = await res.json();
 
-    await fetchPatients();
-  } catch (error: unknown) {
-  console.error(error);
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to add patient");
+      }
 
-  if (error instanceof Error) {
-    console.log(error.message);
-  }
+      const extractedPassword = extractTemporaryPassword(data);
+      setTemporaryPassword(extractedPassword);
 
-  } finally {
-    setIsSubmitting(false);
-  }
-};
+      toast({
+        title: "Patient Added",
+        description: extractedPassword
+          ? `Temporary Password: ${extractedPassword}`
+          : "Patient created successfully. Temporary password was not returned.",
+      });
+
+      setAddDialogOpen(false);
+
+      setFormData({
+        fullName: "",
+        email: "",
+        phoneNumber: "",
+        address: "",
+        gender: "",
+        dateOfBirth: "",
+      });
+
+      await fetchPatients();
+    } catch (error: unknown) {
+      console.error(error);
+      toast({
+        title: "Error",
+        description:
+          error instanceof Error ? error.message : "Failed to add patient",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleViewPatient = async (patient: AdminPatient) => {
     const details = await fetchPatientById(patient.id);
@@ -168,7 +200,7 @@ export default function AdminPatients() {
   const filtered = patients.filter((p) =>
     `${p.patientName} ${p.email}`
       .toLowerCase()
-      .includes(searchQuery.toLowerCase())
+      .includes(searchQuery.toLowerCase()),
   );
 
   const getInitials = (name: string) => {
@@ -180,7 +212,6 @@ export default function AdminPatients() {
   return (
     <DashboardLayout role="admin">
       <div className="space-y-6">
-
         {/* HEADER */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -205,7 +236,9 @@ export default function AdminPatients() {
             </DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle className="font-display">Add New Patient</DialogTitle>
+                <DialogTitle className="font-display">
+                  Add New Patient
+                </DialogTitle>
                 <DialogDescription>
                   Fill in the details to add a new patient.
                 </DialogDescription>
@@ -216,15 +249,19 @@ export default function AdminPatients() {
                   <Input
                     placeholder="John Doe"
                     value={formData.fullName}
-                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, fullName: e.target.value })
+                    }
                   />
                 </div>
-                 <div className="space-y-2">
+                <div className="space-y-2">
                   <Label>PhoneNumber</Label>
                   <Input
                     placeholder="+1 555-0000"
                     value={formData.phoneNumber}
-                    onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, phoneNumber: e.target.value })
+                    }
                   />
                 </div>
                 <div className="space-y-2">
@@ -233,46 +270,48 @@ export default function AdminPatients() {
                     type="email"
                     placeholder="patient@email.com"
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, email: e.target.value })
+                    }
                   />
                 </div>
                 <div className="space-y-2">
-  <Label>Address</Label>
-  <Input
-    placeholder="Address"
-    value={formData.address}
-    onChange={(e) =>
-      setFormData({ ...formData, address: e.target.value })
-    }
-  />
-</div>
+                  <Label>Address</Label>
+                  <Input
+                    placeholder="Address"
+                    value={formData.address}
+                    onChange={(e) =>
+                      setFormData({ ...formData, address: e.target.value })
+                    }
+                  />
+                </div>
 
-<div className="space-y-2">
-  <Label>Gender</Label>
-  <select
-    className="w-full h-10 rounded-md border border-input bg-background px-3"
-    value={formData.gender}
-    onChange={(e) =>
-      setFormData({ ...formData, gender: e.target.value })
-    }
-  >
-    <option value="">Select Gender</option>
-    <option value="male">Male</option>
-    <option value="female">Female</option>
-  </select>
-</div>
+                <div className="space-y-2">
+                  <Label>Gender</Label>
+                  <select
+                    className="w-full h-10 rounded-md border border-input bg-background px-3"
+                    value={formData.gender}
+                    onChange={(e) =>
+                      setFormData({ ...formData, gender: e.target.value })
+                    }
+                  >
+                    <option value="">Select Gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
 
-<div className="space-y-2">
-  <Label>Date Of Birth</Label>
-  <Input
-    type="date"
-    value={formData.dateOfBirth}
-    onChange={(e) =>
-      setFormData({ ...formData, dateOfBirth: e.target.value })
-    }
-  />
-</div>
-               
+                <div className="space-y-2">
+                  <Label>Date Of Birth</Label>
+                  <Input
+                    type="date"
+                    value={formData.dateOfBirth}
+                    onChange={(e) =>
+                      setFormData({ ...formData, dateOfBirth: e.target.value })
+                    }
+                  />
+                </div>
+
                 <div className="flex gap-2 pt-2">
                   <Button
                     className="w-full gradient-bg border-0"
@@ -325,7 +364,9 @@ export default function AdminPatients() {
                   >
                     <div className="flex items-center gap-3">
                       <Avatar className="h-10 w-10">
-                        <AvatarImage src={patient.profileImageUrl ?? undefined} />
+                        <AvatarImage
+                          src={patient.profileImageUrl ?? undefined}
+                        />
                         <AvatarFallback>
                           {getInitials(patient.patientName)}
                         </AvatarFallback>
@@ -358,13 +399,17 @@ export default function AdminPatients() {
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="font-display">Patient Details</DialogTitle>
+              <DialogTitle className="font-display">
+                Patient Details
+              </DialogTitle>
             </DialogHeader>
             {selectedPatient && (
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <Avatar className="h-16 w-16">
-                    <AvatarImage src={selectedPatient.profileImageUrl ?? undefined} />
+                    <AvatarImage
+                      src={selectedPatient.profileImageUrl ?? undefined}
+                    />
                     <AvatarFallback className="text-lg">
                       {getInitials(selectedPatient.patientName)}
                     </AvatarFallback>
@@ -381,20 +426,26 @@ export default function AdminPatients() {
                     <Mail className="w-4 h-4 text-primary shrink-0" />
                     <div>
                       <p className="text-[10px] text-muted-foreground">Email</p>
-                      <p className="text-xs font-medium text-foreground">{selectedPatient.email}</p>
+                      <p className="text-xs font-medium text-foreground">
+                        {selectedPatient.email}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
                     <Phone className="w-4 h-4 text-primary shrink-0" />
                     <div>
                       <p className="text-[10px] text-muted-foreground">Phone</p>
-                      <p className="text-xs font-medium text-foreground">{selectedPatient.phone || "—"}</p>
+                      <p className="text-xs font-medium text-foreground">
+                        {selectedPatient.phone || "—"}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
                     <User className="w-4 h-4 text-primary shrink-0" />
                     <div>
-                      <p className="text-[10px] text-muted-foreground">Gender</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Gender
+                      </p>
                       <p className="text-xs font-medium text-foreground capitalize">
                         {selectedPatient.gender || "—"}
                       </p>
@@ -406,6 +457,47 @@ export default function AdminPatients() {
           </DialogContent>
         </Dialog>
 
+        <Dialog
+          open={Boolean(temporaryPassword)}
+          onOpenChange={(open) => {
+            if (!open) setTemporaryPassword(null);
+          }}
+        >
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-display">
+                Temporary Password
+              </DialogTitle>
+              <DialogDescription>
+                Share this temporary password with the patient.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input value={temporaryPassword ?? ""} readOnly />
+              <Button
+                className="w-full"
+                onClick={async () => {
+                  if (!temporaryPassword) return;
+                  try {
+                    await navigator.clipboard.writeText(temporaryPassword);
+                    toast({
+                      title: "Copied",
+                      description: "Temporary password copied to clipboard",
+                    });
+                  } catch {
+                    toast({
+                      title: "Copy Failed",
+                      description: "Could not copy password to clipboard",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              >
+                Copy Password
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

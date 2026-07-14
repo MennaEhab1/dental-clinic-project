@@ -595,7 +595,7 @@ export default function PatientPrescriptions() {
                 </div>
 
                 {/* Instructions */}
-                <div>
+                {/* <div>
                   <h4 className="font-semibold text-gray-900 dark:text-white mb-2">
                     General Instructions
                   </h4>
@@ -603,7 +603,7 @@ export default function PatientPrescriptions() {
                     {selectedPrescription.instructions ||
                       "No specific instructions provided"}
                   </p>
-                </div>
+                </div> */}
 
                 {/* Medications */}
                 <div>

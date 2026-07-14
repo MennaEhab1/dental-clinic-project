@@ -3868,7 +3868,8 @@ export const reviewService = {
   },
 
   /**
-   * GET /api/PatientReviews/GetMyReviewsForDoctor/{doctorId}
+   * GET /api/Home/{doctorId}/reviews
+   * Public endpoint: no patient sign-in required.
    */
   async getReviewsForDoctor(doctorId: string): Promise<ApiResponse<Review[]>> {
     const numericDoctorId = parseDoctorNumericId(doctorId);
@@ -3882,7 +3883,7 @@ export const reviewService = {
 
     try {
       const res = await apiCall<unknown>(
-        `/api/PatientReviews/GetMyReviewsForDoctor/${numericDoctorId}`,
+        `/api/Home/${numericDoctorId}/reviews`,
         { method: "GET" },
       );
       const reviews = mapReviewListResponse(res.data);

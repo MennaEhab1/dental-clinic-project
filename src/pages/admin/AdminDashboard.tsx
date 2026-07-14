@@ -9,25 +9,38 @@ import { Badge } from "@/components/ui/badge";
 import {
   Calendar,
   Users,
-  DollarSign,
   ArrowRight,
   TrendingUp,
   UserPlus,
   Stethoscope,
   Activity,
+  MessageSquare,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   adminAppointmentService,
   adminDoctorService,
   adminPatientService,
+  reviewService,
 } from "@/services/api";
 import type { Appointment, DashboardStats, Doctor } from "@/types";
+import { DoctorReviewsDialog } from "@/components/doctors/DoctorReviewsDialog";
+
+interface DoctorReviewSummary {
+  averageRating: number;
+  totalReviews: number;
+}
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [doctorReviewSummary, setDoctorReviewSummary] = useState<
+    Record<string, DoctorReviewSummary>
+  >({});
+  const [reviewsOpenDoctor, setReviewsOpenDoctor] = useState<Doctor | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -45,6 +58,40 @@ export default function AdminDashboard() {
 
         setAppointments(appointmentList);
         setDoctors(doctorList);
+
+        const reviewEntries = await Promise.all(
+          doctorList.map(async (doctor) => {
+            try {
+              const response = await reviewService.getReviewsForDoctor(
+                doctor.id,
+              );
+              const items = response.success ? response.data || [] : [];
+              const totalReviews = items.length;
+              const averageRating =
+                totalReviews > 0
+                  ? items.reduce((sum, item) => sum + (item.rating || 0), 0) /
+                    totalReviews
+                  : 0;
+
+              return [
+                doctor.id,
+                {
+                  totalReviews,
+                  averageRating,
+                },
+              ] as const;
+            } catch {
+              return [
+                doctor.id,
+                {
+                  totalReviews: 0,
+                  averageRating: 0,
+                },
+              ] as const;
+            }
+          }),
+        );
+        setDoctorReviewSummary(Object.fromEntries(reviewEntries));
 
         setStats({
           totalPatients: patientList.length,
@@ -94,14 +141,6 @@ export default function AdminDashboard() {
       color: "text-warning",
       bg: "bg-warning/10",
     },
-    {
-      label: "Revenue",
-      value: `$${(stats?.revenue || 0).toLocaleString()}`,
-      icon: DollarSign,
-      change: "+15%",
-      color: "text-success",
-      bg: "bg-success/10",
-    },
   ];
 
   const statusColors: Record<string, string> = {
@@ -144,7 +183,7 @@ export default function AdminDashboard() {
         </motion.div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {dashboardStats.map((stat, index) => (
             <motion.div
               key={stat.label}
@@ -265,13 +304,34 @@ export default function AdminDashboard() {
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium text-foreground">
-                        ⭐ {doctor.rating}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {doctor.reviewCount} reviews
-                      </p>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className="text-sm font-medium text-foreground">
+                          ⭐{" "}
+                          {(
+                            doctorReviewSummary[doctor.id]?.averageRating ??
+                            doctor.averageRating ??
+                            doctor.rating ??
+                            0
+                          ).toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {doctorReviewSummary[doctor.id]?.totalReviews ??
+                            doctor.totalReviews ??
+                            doctor.reviewCount ??
+                            0}{" "}
+                          reviews
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setReviewsOpenDoctor(doctor)}
+                      >
+                        <MessageSquare className="w-4 h-4 mr-2" />
+                        Reviews
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -279,6 +339,16 @@ export default function AdminDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {reviewsOpenDoctor && (
+          <DoctorReviewsDialog
+            doctor={reviewsOpenDoctor}
+            open={Boolean(reviewsOpenDoctor)}
+            onOpenChange={(open) => {
+              if (!open) setReviewsOpenDoctor(null);
+            }}
+          />
+        )}
       </div>
     </DashboardLayout>
   );

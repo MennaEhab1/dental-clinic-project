@@ -31,6 +31,12 @@ function normalizeRole(role?: string): "patient" | "doctor" | "admin" {
   return "patient";
 }
 
+function isEmailLike(value?: string): boolean {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /.+@.+\..+/.test(text) || text.includes("@");
+}
+
 function normalizeBackendUser(raw: BackendUser): BackendUser {
   const userName = raw.userName || "";
   const normalizedUserName = userName
@@ -41,9 +47,14 @@ function normalizeBackendUser(raw: BackendUser): BackendUser {
 
   const explicitFirstName = (raw.firstName || "").trim();
   const explicitLastName = (raw.lastName || "").trim();
+  const explicitNamesLookLikeEmail =
+    isEmailLike(explicitFirstName) || isEmailLike(explicitLastName);
+  const userNameLooksLikeEmail = isEmailLike(userName);
 
-  let firstNameFromResponse = explicitFirstName;
-  let lastNameFromResponse = explicitLastName;
+  let firstNameFromResponse = explicitNamesLookLikeEmail
+    ? ""
+    : explicitFirstName;
+  let lastNameFromResponse = explicitNamesLookLikeEmail ? "" : explicitLastName;
 
   if (explicitFirstName && !explicitLastName) {
     const firstNameParts = explicitFirstName
@@ -58,8 +69,10 @@ function normalizeBackendUser(raw: BackendUser): BackendUser {
     }
   }
 
-  const firstNameFromUserName = parts[0] || "";
-  const lastNameFromUserName = parts.slice(1).join(" ");
+  const firstNameFromUserName = userNameLooksLikeEmail ? "" : parts[0] || "";
+  const lastNameFromUserName = userNameLooksLikeEmail
+    ? ""
+    : parts.slice(1).join(" ");
 
   return {
     ...raw,

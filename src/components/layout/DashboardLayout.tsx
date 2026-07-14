@@ -40,6 +40,55 @@ interface DashboardLayoutProps {
   role: "patient" | "doctor" | "admin";
 }
 
+function normalizeNameSegment(value?: string): string {
+  return String(value || "")
+    .replace(/[_\-.]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isEmail(value: string): boolean {
+  return /.+@.+\..+/.test(value.trim());
+}
+
+function isEmailLike(value?: string): boolean {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return isEmail(text) || text.includes("@");
+}
+
+function getUserDisplayName(
+  user: {
+    firstName?: string;
+    lastName?: string;
+    userName?: string;
+    email?: string;
+  } | null,
+): string {
+  if (!user) return "";
+
+  const rawFirstLast = [user.firstName, user.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const fromFirstLast = normalizeNameSegment(rawFirstLast);
+  if (fromFirstLast && !isEmailLike(rawFirstLast)) return fromFirstLast;
+
+  const rawUserName = String(user.userName || "").trim();
+  const fromUserName = normalizeNameSegment(rawUserName);
+  if (fromUserName && !isEmailLike(rawUserName)) return fromUserName;
+
+  const emailLocalPart = String(user.email || "").split("@")[0] || "";
+  return normalizeNameSegment(emailLocalPart);
+}
+
+function getDisplayInitials(displayName: string): string {
+  const parts = displayName.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
+
 const patientNav = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/patient/dashboard" },
   { icon: Calendar, label: "Appointments", href: "/patient/appointments" },
@@ -57,7 +106,7 @@ const doctorNav = [
   { icon: CalendarDays, label: "My Schedule", href: "/doctor/schedule" },
   { icon: Users, label: "My Patients", href: "/doctor/patients" },
   { icon: FileText, label: "Medical Records", href: "/doctor/records" },
-  { icon: MessageSquare, label: "Messages", href: "/doctor/messages" },
+
   { icon: KeyRound, label: "Update Password", href: "/doctor/updatePassword" },
 ];
 
@@ -87,6 +136,8 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const notificationsRef = useRef<HTMLDivElement | null>(null);
+  const displayName = getUserDisplayName(user);
+  const displayInitials = getDisplayInitials(displayName);
 
   useEffect(() => {
     if (role !== "patient") return;
@@ -401,24 +452,18 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
               <Avatar className="h-10 w-10">
                 <AvatarImage src={avatarSrc} />
                 <AvatarFallback>
-                  {avatarSrc ? (
-                    <>
-                      {user?.firstName?.[0]}
-                      {user?.lastName?.[0]}
-                    </>
+                  {displayInitials ? (
+                    displayInitials
                   ) : role === "doctor" ? (
                     <Stethoscope className="w-4 h-4" />
                   ) : (
-                    <>
-                      {user?.firstName?.[0]}
-                      {user?.lastName?.[0]}
-                    </>
+                    "U"
                   )}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-foreground truncate">
-                  {user?.firstName} {user?.lastName}
+                  {displayName || "User"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {roleLabel} Portal
@@ -482,18 +527,12 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
             <Avatar className="h-9 w-9">
               <AvatarImage src={avatarSrc} />
               <AvatarFallback>
-                {avatarSrc ? (
-                  <>
-                    {user?.firstName?.[0]}
-                    {user?.lastName?.[0]}
-                  </>
+                {displayInitials ? (
+                  displayInitials
                 ) : role === "doctor" ? (
                   <Stethoscope className="w-4 h-4" />
                 ) : (
-                  <>
-                    {user?.firstName?.[0]}
-                    {user?.lastName?.[0]}
-                  </>
+                  "U"
                 )}
               </AvatarFallback>
             </Avatar>

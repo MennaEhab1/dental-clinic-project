@@ -13,6 +13,61 @@ import { doctorService } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Appointment, DashboardStats, Patient } from "@/types";
 
+function normalizeNameSegment(value?: string): string {
+  return String(value || "")
+    .replace(/[_\-.]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isEmail(value: string): boolean {
+  return /.+@.+\..+/.test(value.trim());
+}
+
+function isEmailLike(value?: string): boolean {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return isEmail(text) || text.includes("@");
+}
+
+function stripDoctorTitle(value: string): string {
+  return value.replace(/^\s*dr\.?\s+/i, "").trim();
+}
+
+function getDoctorDisplayName(
+  user: {
+    firstName?: string;
+    lastName?: string;
+    userName?: string;
+    email?: string;
+  } | null,
+): string {
+  if (!user) return "Doctor";
+
+  const rawFirstLast = [user.firstName, user.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const fromFirstLast = normalizeNameSegment(rawFirstLast);
+  if (fromFirstLast && !isEmailLike(rawFirstLast)) {
+    return stripDoctorTitle(fromFirstLast);
+  }
+
+  const rawUserName = String(user.userName || "").trim();
+  const fromUserName = normalizeNameSegment(rawUserName);
+  if (fromUserName && !isEmailLike(rawUserName)) {
+    return stripDoctorTitle(fromUserName);
+  }
+
+  const emailLocalPart = String(user.email || "").split("@")[0] || "";
+  const fromEmail = normalizeNameSegment(emailLocalPart);
+  if (fromEmail) {
+    return stripDoctorTitle(fromEmail);
+  }
+
+  return "Doctor";
+}
+
 function toDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -36,6 +91,7 @@ export default function DoctorDashboard() {
   const [recentPatients, setRecentPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
+  const doctorDisplayName = getDoctorDisplayName(user);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -153,7 +209,7 @@ export default function DoctorDashboard() {
           <div className="flex items-start justify-between">
             <div>
               <h1 className="font-display text-2xl md:text-3xl font-bold text-foreground mb-2">
-                Good morning, Dr. {user?.lastName || "Doctor"}! 👋
+                Good morning, Dr. {doctorDisplayName}! 👋
               </h1>
               <p className="text-muted-foreground">
                 You have {todayAppointments.length} appointments scheduled for

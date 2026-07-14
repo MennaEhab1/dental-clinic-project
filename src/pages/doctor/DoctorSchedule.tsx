@@ -114,6 +114,40 @@ function normalizeDayOfWeek(dayValue: unknown): string {
   return matched || raw;
 }
 
+function getScheduleDedupKey(slot: DoctorSchedule): string {
+  return [
+    normalizeDayOfWeek(slot.dayOfWeek).toLowerCase(),
+    formatTime(slot.startTime),
+    formatTime(slot.endTime),
+  ].join("|");
+}
+
+function dedupeScheduleByDayAndTime(slots: DoctorSchedule[]): DoctorSchedule[] {
+  const uniqueByDayAndTime = new Map<string, DoctorSchedule>();
+
+  slots.forEach((slot) => {
+    const key = getScheduleDedupKey(slot);
+    const existing = uniqueByDayAndTime.get(key);
+
+    // Keep the entry with a valid numeric id when duplicates exist.
+    if (!existing) {
+      uniqueByDayAndTime.set(key, slot);
+      return;
+    }
+
+    const existingId = Number(existing.id);
+    const nextId = Number(slot.id);
+    const existingHasValidId = Number.isFinite(existingId) && existingId > 0;
+    const nextHasValidId = Number.isFinite(nextId) && nextId > 0;
+
+    if (!existingHasValidId && nextHasValidId) {
+      uniqueByDayAndTime.set(key, slot);
+    }
+  });
+
+  return Array.from(uniqueByDayAndTime.values());
+}
+
 export default function DoctorSchedulePage() {
   const [schedule, setSchedule] = useState<DoctorSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -162,7 +196,8 @@ export default function DoctorSchedulePage() {
             ...slot,
             dayOfWeek: normalizeDayOfWeek(slot.dayOfWeek),
           }));
-          setSchedule(normalized);
+          const deduped = dedupeScheduleByDayAndTime(normalized);
+          setSchedule(deduped);
         }
       })
       .catch(() => {

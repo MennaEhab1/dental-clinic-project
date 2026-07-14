@@ -11,7 +11,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import type { Doctor, Review } from "@/types";
 import { reviewService } from "@/services/api";
-import { useAuth } from "@/contexts/AuthContext";
 
 interface DoctorReviewsDialogProps {
   doctor: Doctor;
@@ -40,7 +39,6 @@ export function DoctorReviewsDialog({
   const [reviews, setReviews] = useState<Review[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const { user } = useAuth();
   const doctorName = toDoctorDisplayName(doctor);
 
   useEffect(() => {
@@ -49,13 +47,6 @@ export function DoctorReviewsDialog({
     const fetchReviews = async () => {
       setIsLoading(true);
       setErrorMessage(null);
-
-      if (!user || user.role !== "patient") {
-        setReviews([]);
-        setErrorMessage("Sign in as a patient to view reviews for this doctor.");
-        setIsLoading(false);
-        return;
-      }
 
       try {
         const response = await reviewService.getReviewsForDoctor(doctor.id);
@@ -74,7 +65,7 @@ export function DoctorReviewsDialog({
     };
 
     fetchReviews();
-  }, [open, doctor.id, user]);
+  }, [open, doctor.id]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

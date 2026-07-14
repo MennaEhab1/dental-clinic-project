@@ -152,45 +152,44 @@ export default function AdminDoctors() {
   //     consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
   //   };
   // };
-const buildFormDataFromDoctor = (
-  doctor: Doctor & {
-    gender?: string;
-    address?: string;
-    specialization?: string;
-    fullName?: string;
-    specialityName?: string;
-  },
-): DoctorFormData => {
-  const defaultId = specializations[0]?.id ?? 0;
-  const matchedSpec = specializations.find(
-    (s) =>
-      s.name.toLowerCase().replace(/\s+/g, "") ===
-      String(
-        doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
-      )
-        .toLowerCase()
-        .replace(/[-\s]/g, ""),
-  );
+  const buildFormDataFromDoctor = (
+    doctor: Doctor & {
+      gender?: string;
+      address?: string;
+      specialization?: string;
+      fullName?: string;
+      specialityName?: string;
+    },
+  ): DoctorFormData => {
+    const defaultId = specializations[0]?.id ?? 0;
+    const matchedSpec = specializations.find(
+      (s) =>
+        s.name.toLowerCase().replace(/\s+/g, "") ===
+        String(
+          doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
+        )
+          .toLowerCase()
+          .replace(/[-\s]/g, ""),
+    );
 
-  // ✅ شيل الـ "Dr." من الاسم قبل ما يتحط في الـ form
-  const stripDr = (name: string) =>
-    name.replace(/^\s*dr\.?\s*/i, "").trim();
+    // ✅ شيل الـ "Dr." من الاسم قبل ما يتحط في الـ form
+    const stripDr = (name: string) => name.replace(/^\s*dr\.?\s*/i, "").trim();
 
-  const rawFullName =
-    doctor.fullName?.trim() ||
-    `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
+    const rawFullName =
+      doctor.fullName?.trim() ||
+      `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
 
-  const fullName = stripDr(rawFullName);
+    const fullName = stripDr(rawFullName);
 
-  return {
-    fullName,
-    email: doctor.email,
-    password: "",
-    specialityID: matchedSpec?.id ?? defaultId,
-    workingHours: doctor.workingHours ?? doctor.experience ?? 0,
-    consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
+    return {
+      fullName,
+      email: doctor.email,
+      password: "",
+      specialityID: matchedSpec?.id ?? defaultId,
+      workingHours: doctor.workingHours ?? doctor.experience ?? 0,
+      consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
+    };
   };
-};
   const handleOpenDialog = async (doctor?: Doctor) => {
     const defaultId = specializations[0]?.id ?? 0;
     if (specializations.length === 0) {
@@ -525,8 +524,6 @@ const buildFormDataFromDoctor = (
   // };
 
   const handleDelete = async (id: string) => {
-    // if (!confirm("Are you sure you want to delete this doctor?")) return;
-
     try {
       const token = localStorage.getItem("auth_token");
       const res = await fetch(
@@ -538,11 +535,9 @@ const buildFormDataFromDoctor = (
       );
 
       if (res.ok) {
-        // ✅ 200 — مفيش مواعيد، اتمسح
         setDoctors((prev) => prev.filter((d) => d.id !== id));
         toast({ title: "Success", description: "Doctor deleted successfully" });
       } else {
-        // ✅ 500 — عنده مواعيد
         toast({
           title: "Cannot Delete Doctor",
           description:

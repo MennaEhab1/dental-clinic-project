@@ -122,13 +122,13 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
   className = "",
   edgeSensitivity = 30,
   glowColor = "40 80 80",
-  backgroundColor = "#131720",
+  backgroundColor = "hsl(var(--background))",
   borderRadius = 15,
   glowRadius = 40,
   glowIntensity = 1.0,
   coneSpread = 25,
-  animated = false,
-  colors = ["#c084fc", "#f472b6", "#38bdf8"],
+  animated = true,
+  colors = ["#15cfbc", "#44dbc0", "#38bdf8"],
   fillOpacity = 0.5,
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -336,9 +336,7 @@ const BorderGlow: React.FC<BorderGlowProps> = ({
         />
       </span>
 
-      <div className="flex flex-col relative overflow-auto z-[1]">
-        {children}
-      </div>
+      <div className="flex flex-col relative  z-[1]">{children}</div>
     </div>
   );
 };

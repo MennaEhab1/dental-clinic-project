@@ -85,7 +85,7 @@ export default function LandingPage() {
             homeService.getTopReviews(),
           ]);
 
-        setFeaturedDoctors(doctorsRes.data.slice(0, 3));
+        setFeaturedDoctors(doctorsRes.data.slice(5, 8));
         setFeaturedServices(servicesRes.data.slice(0, 4));
         setHomeStatistics(statisticsRes.data);
         setTopReviews(reviewsRes.data);
@@ -264,10 +264,7 @@ export default function LandingPage() {
           >
             {features.map((feature) => (
               <motion.div key={feature.title} variants={fadeInUp} className="">
-                <BorderGlow
-                  colors={["#c084fc", "#f472b6", "#38bdf8"]}
-                  className="p-6 rounded-2xl bg-background border border-border hover:shadow-card transition-shadow group"
-                >
+                <BorderGlow className="p-6 rounded-2xl  border border-border bg-transparent hover:shadow-card transition-shadow group">
                   <div className="w-14 h-14 rounded-xl gradient-bg flex items-center justify-center mb-4 group-hover:scale-104 transition-transform">
                     <feature.icon className="w-7 h-7 text-primary-foreground" />
                   </div>
@@ -301,10 +298,12 @@ export default function LandingPage() {
               </p>
             </div>
             <Link to="/services">
-              <Button variant="outline">
-                View All Services
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
+              <BorderGlow>
+                <Button variant="outline">
+                  View All Services
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </BorderGlow>
             </Link>
           </motion.div>
 
@@ -316,8 +315,11 @@ export default function LandingPage() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: index * 0.1 }}
+                style={{ isolation: "auto" }}
               >
-                <ServiceCard service={service} />
+                <BorderGlow backgroundColor="transparent">
+                  <ServiceCard service={service} />
+                </BorderGlow>
               </motion.div>
             ))}
           </div>
@@ -341,10 +343,12 @@ export default function LandingPage() {
               </p>
             </div>
             <Link to="/doctors">
-              <Button variant="outline">
-                View All Doctors
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </Button>
+              <BorderGlow>
+                <Button variant="outline">
+                  View All Doctors
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              </BorderGlow>
             </Link>
           </motion.div>
 
@@ -357,7 +361,9 @@ export default function LandingPage() {
                 viewport={{ once: true }}
                 transition={{ delay: index * 0.1 }}
               >
-                <DoctorCard doctor={doctor} />
+                <BorderGlow>
+                  <DoctorCard doctor={doctor} />
+                </BorderGlow>
               </motion.div>
             ))}
           </div>
@@ -381,49 +387,51 @@ export default function LandingPage() {
 
           <div className="grid md:grid-cols-3 gap-6">
             {topReviews.map((review, index) => (
-              <motion.div
-                key={`${review.patientName}-${index}`}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.1 }}
-                className="p-6 rounded-2xl bg-card border border-border"
-              >
-                <div className="flex items-center gap-1 mb-4">
-                  {[...Array(review.rating)].map((_, i) => (
-                    <Star
-                      key={i}
-                      className="w-4 h-4 text-warning fill-warning"
-                    />
-                  ))}
-                </div>
-                <p className="text-muted-foreground mb-6">{review.comment}</p>
-                <div className="flex items-center gap-3">
-                  {review.profileImageUrl ? (
-                    <img
-                      src={review.profileImageUrl}
-                      alt={review.patientName}
-                      className="w-12 h-12 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold">
-                      {review.patientName
-                        .split(" ")
-                        .filter(Boolean)
-                        .slice(0, 2)
-                        .map((part) => part[0])
-                        .join("")
-                        .toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <p className="font-semibold text-foreground">
-                      {review.patientName}
-                    </p>
-                    <p className="text-sm text-muted-foreground">Patient</p>
+              <BorderGlow>
+                <motion.div
+                  key={`${review.patientName}-${index}`}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: index * 0.1 }}
+                  className="p-6 rounded-2xl bg-card border border-border"
+                >
+                  <div className="flex items-center gap-1 mb-4">
+                    {[...Array(review.rating)].map((_, i) => (
+                      <Star
+                        key={i}
+                        className="w-4 h-4 text-warning fill-warning"
+                      />
+                    ))}
                   </div>
-                </div>
-              </motion.div>
+                  <p className="text-muted-foreground mb-6">{review.comment}</p>
+                  <div className="flex items-center gap-3">
+                    {review.profileImageUrl ? (
+                      <img
+                        src={review.profileImageUrl}
+                        alt={review.patientName}
+                        className="w-12 h-12 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold">
+                        {review.patientName
+                          .split(" ")
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((part) => part[0])
+                          .join("")
+                          .toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        {review.patientName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Patient</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </BorderGlow>
             ))}
           </div>
         </div>

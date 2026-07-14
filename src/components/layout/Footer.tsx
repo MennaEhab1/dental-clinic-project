@@ -1,42 +1,42 @@
-import { Link } from 'react-router-dom';
-import { 
-  Phone, 
-  Mail, 
-  MapPin, 
-  Facebook, 
-  Twitter, 
-  Instagram, 
+import { Link } from "react-router-dom";
+import {
+  Phone,
+  Mail,
+  MapPin,
+  Facebook,
+  Twitter,
+  Instagram,
   Linkedin,
-  Clock
-} from 'lucide-react';
+  Clock,
+} from "lucide-react";
 
 const footerLinks = {
   services: [
-    { label: 'General Dentistry', href: '/services#general' },
-    { label: 'Cosmetic Dentistry', href: '/services#cosmetic' },
-    { label: 'Orthodontics', href: '/services#orthodontics' },
-    { label: 'Oral Surgery', href: '/services#surgery' },
-    { label: 'Pediatric Dentistry', href: '/services#pediatric' },
+    { label: "General Dentistry", href: "/services#general" },
+    { label: "Cosmetic Dentistry", href: "/services#cosmetic" },
+    { label: "Orthodontics", href: "/services#orthodontics" },
+    { label: "Oral Surgery", href: "/services#surgery" },
+    { label: "Pediatric Dentistry", href: "/services#pediatric" },
   ],
   quickLinks: [
-    { label: 'About Us', href: '/about' },
-    { label: 'Our Doctors', href: '/doctors' },
-    { label: 'Book Appointment', href: '/booking' },
-    { label: 'Patient Portal', href: '/login' },
-    { label: 'Contact', href: '/contact' },
+    { label: "About Us", href: "/about" },
+    { label: "Our Doctors", href: "/doctors" },
+    { label: "Book Appointment", href: "/booking" },
+    { label: "Patient Portal", href: "/login" },
+    { label: "Contact", href: "/contact" },
   ],
   legal: [
-    { label: 'Privacy Policy', href: '/privacy' },
-    { label: 'Terms of Service', href: '/terms' },
-    { label: 'HIPAA Compliance', href: '/hipaa' },
+    { label: "Privacy Policy", href: "/privacy" },
+    { label: "Terms of Service", href: "/terms" },
+    { label: "HIPAA Compliance", href: "/hipaa" },
   ],
 };
 
 const socialLinks = [
-  { icon: Facebook, href: '#', label: 'Facebook' },
-  { icon: Twitter, href: '#', label: 'Twitter' },
-  { icon: Instagram, href: '#', label: 'Instagram' },
-  { icon: Linkedin, href: '#', label: 'LinkedIn' },
+  { icon: Facebook, href: "#", label: "Facebook" },
+  { icon: Twitter, href: "#", label: "Twitter" },
+  { icon: Instagram, href: "#", label: "Instagram" },
+  { icon: Linkedin, href: "#", label: "LinkedIn" },
 ];
 
 export function Footer() {
@@ -47,45 +47,65 @@ export function Footer() {
           {/* Brand & Contact */}
           <div className="lg:col-span-1">
             <Link to="/" className="flex items-center gap-2 mb-4">
-              <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center">
-                <span className="text-xl font-bold text-primary-foreground">D</span>
-              </div>
-              <span className="text-xl font-display font-bold text-foreground">
-                Dental<span className="gradient-text">Care</span>
-              </span>
+              <img
+                src="/public/LogoLunare.png"
+                alt="Lunare Logo"
+                className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+              />
             </Link>
             <p className="text-muted-foreground text-sm mb-6">
-              Providing exceptional dental care with compassion and expertise for over 15 years.
+              Providing exceptional dental care with compassion and expertise.
             </p>
             <div className="space-y-3">
               <a
-                href="tel:+15551234567"
+                href="tel:+2018173505"
                 className="flex items-center gap-3 text-sm text-muted-foreground hover:text-primary transition-colors"
               >
                 <Phone className="w-4 h-4 text-primary" />
-                +1 555-123-4567
+                +2018173505
               </a>
               <a
                 href="mailto:info@dentalcare.com"
                 className="flex items-center gap-3 text-sm text-muted-foreground hover:text-primary transition-colors"
               >
                 <Mail className="w-4 h-4 text-primary" />
-                info@dentalcare.com
+                info@LunareDetal.com
               </a>
               <div className="flex items-start gap-3 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4 text-primary mt-0.5" />
-                <span>123 Dental Avenue, Suite 100<br />New York, NY 10001</span>
+                <span>
+                  El-Estad
+                  <br />
+                  Tanta, Egypt
+                </span>
               </div>
-              <div className="flex items-start gap-3 text-sm text-muted-foreground">
+              {/* <div className="flex items-start gap-3 text-sm text-muted-foreground">
                 <Clock className="w-4 h-4 text-primary mt-0.5" />
-                <span>Mon - Fri: 8AM - 6PM<br />Sat: 9AM - 2PM</span>
-              </div>
+                <span>
+                  Mon - Fri: 8AM - 6PM
+                  <br />
+                  Sat: 9AM - 2PM
+                </span>
+              </div> */}
             </div>
           </div>
 
           {/* Services */}
           <div>
-            <h4 className="font-display font-semibold text-foreground mb-4">Our Services</h4>
+            <h4 className="font-display font-semibold text-foreground mb-4">
+              Our Services
+            </h4>
             <ul className="space-y-2">
               {footerLinks.services.map((link) => (
                 <li key={link.href}>
@@ -102,7 +122,9 @@ export function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h4 className="font-display font-semibold text-foreground mb-4">Quick Links</h4>
+            <h4 className="font-display font-semibold text-foreground mb-4">
+              Quick Links
+            </h4>
             <ul className="space-y-2">
               {footerLinks.quickLinks.map((link) => (
                 <li key={link.href}>
@@ -119,7 +141,9 @@ export function Footer() {
 
           {/* Newsletter */}
           <div>
-            <h4 className="font-display font-semibold text-foreground mb-4">Stay Updated</h4>
+            <h4 className="font-display font-semibold text-foreground mb-4">
+              Stay Updated
+            </h4>
             <p className="text-sm text-muted-foreground mb-4">
               Subscribe to our newsletter for dental tips and updates.
             </p>
@@ -154,7 +178,7 @@ export function Footer() {
         {/* Bottom Bar */}
         <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} DentalCare. All rights reserved.
+            © {new Date().getFullYear()} Lunare Team. All rights reserved.
           </p>
           <div className="flex items-center gap-6">
             {footerLinks.legal.map((link) => (

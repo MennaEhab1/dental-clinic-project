@@ -92,7 +92,7 @@ export function ServiceCard({
           <h4 className="font-medium text-foreground truncate">
             {service.name}
           </h4>
-          <div className="flex items-center gap-3 mt-1">
+          {/* <div className="flex items-center gap-3 mt-1">
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="w-3 h-3" />
               {service.duration} min
@@ -101,7 +101,7 @@ export function ServiceCard({
               <DollarSign className="w-3 h-3" />
               {service.price}
             </span>
-          </div>
+          </div> */}
         </div>
       </motion.div>
     );
@@ -135,7 +135,7 @@ export function ServiceCard({
           <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
             {service.description}
           </p>
-          <div className="flex items-center gap-4 mb-4">
+          {/* <div className="flex items-center gap-4 mb-4">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Clock className="w-4 h-4" />
               <span className="text-sm">{service.duration} min</span>
@@ -144,7 +144,7 @@ export function ServiceCard({
               <DollarSign className="w-4 h-4" />
               <span>{service.price}</span>
             </div>
-          </div>
+          </div> */}
           <Link to={`/booking?service=${service.id}`}>
             <Button className="w-full gradient-bg border-0">
               Book This Service

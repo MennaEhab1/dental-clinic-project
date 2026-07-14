@@ -120,39 +120,77 @@ export default function AdminDoctors() {
     return matchesSearch && matchesSpecialty;
   });
 
-  const buildFormDataFromDoctor = (
-    doctor: Doctor & {
-      gender?: string;
-      address?: string;
-      specialization?: string;
-      fullName?: string;
-      specialityName?: string;
-    },
-  ): DoctorFormData => {
-    const defaultId = specializations[0]?.id ?? 0;
-    const matchedSpec = specializations.find(
-      (s) =>
-        s.name.toLowerCase().replace(/\s+/g, "") ===
-        String(
-          doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
-        )
-          .toLowerCase()
-          .replace(/[-\s]/g, ""),
-    );
-    const fullName =
-      doctor.fullName?.trim() ||
-      `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
+  // const buildFormDataFromDoctor = (
+  //   doctor: Doctor & {
+  //     gender?: string;
+  //     address?: string;
+  //     specialization?: string;
+  //     fullName?: string;
+  //     specialityName?: string;
+  //   },
+  // ): DoctorFormData => {
+  //   const defaultId = specializations[0]?.id ?? 0;
+  //   const matchedSpec = specializations.find(
+  //     (s) =>
+  //       s.name.toLowerCase().replace(/\s+/g, "") ===
+  //       String(
+  //         doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
+  //       )
+  //         .toLowerCase()
+  //         .replace(/[-\s]/g, ""),
+  //   );
+  //   const fullName =
+  //     doctor.fullName?.trim() ||
+  //     `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
 
-    return {
-      fullName,
-      email: doctor.email,
-      password: "",
-      specialityID: matchedSpec?.id ?? defaultId,
-      workingHours: doctor.workingHours ?? doctor.experience ?? 0,
-      consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
-    };
+  //   return {
+  //     fullName,
+  //     email: doctor.email,
+  //     password: "",
+  //     specialityID: matchedSpec?.id ?? defaultId,
+  //     workingHours: doctor.workingHours ?? doctor.experience ?? 0,
+  //     consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
+  //   };
+  // };
+const buildFormDataFromDoctor = (
+  doctor: Doctor & {
+    gender?: string;
+    address?: string;
+    specialization?: string;
+    fullName?: string;
+    specialityName?: string;
+  },
+): DoctorFormData => {
+  const defaultId = specializations[0]?.id ?? 0;
+  const matchedSpec = specializations.find(
+    (s) =>
+      s.name.toLowerCase().replace(/\s+/g, "") ===
+      String(
+        doctor.specialityName ?? doctor.specialization ?? doctor.specialty,
+      )
+        .toLowerCase()
+        .replace(/[-\s]/g, ""),
+  );
+
+  // ✅ شيل الـ "Dr." من الاسم قبل ما يتحط في الـ form
+  const stripDr = (name: string) =>
+    name.replace(/^\s*dr\.?\s*/i, "").trim();
+
+  const rawFullName =
+    doctor.fullName?.trim() ||
+    `${doctor.firstName ?? ""} ${doctor.lastName ?? ""}`.trim();
+
+  const fullName = stripDr(rawFullName);
+
+  return {
+    fullName,
+    email: doctor.email,
+    password: "",
+    specialityID: matchedSpec?.id ?? defaultId,
+    workingHours: doctor.workingHours ?? doctor.experience ?? 0,
+    consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
   };
-
+};
   const handleOpenDialog = async (doctor?: Doctor) => {
     const defaultId = specializations[0]?.id ?? 0;
     if (specializations.length === 0) {

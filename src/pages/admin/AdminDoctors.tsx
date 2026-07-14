@@ -1134,29 +1134,29 @@ export default function AdminDoctors() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this doctor?")) return;
+  // const handleDelete = async (id: string) => {
+  //   if (!confirm("Are you sure you want to delete this doctor?")) return;
 
-    try {
-      await adminDoctorService.delete(id);
-      setDoctors((prev) => prev.filter((d) => d.id !== id));
-      toast({ title: "Success", description: "Doctor deleted successfully" });
-    } catch (error) {
-      console.error("Failed to delete doctor:", error);
-      const errorMessage = error instanceof Error ? error.message : "";
-      const hasAppointments =
-        errorMessage.toLowerCase().includes("upcoming appointments") ||
-        errorMessage.toLowerCase().includes("appointments are finished");
+  //   try {
+  //     await adminDoctorService.delete(id);
+  //     setDoctors((prev) => prev.filter((d) => d.id !== id));
+  //     toast({ title: "Success", description: "Doctor deleted successfully" });
+  //   } catch (error) {
+  //     console.error("Failed to delete doctor:", error);
+  //     const errorMessage = error instanceof Error ? error.message : "";
+  //     const hasAppointments =
+  //       errorMessage.toLowerCase().includes("upcoming appointments") ||
+  //       errorMessage.toLowerCase().includes("appointments are finished");
 
-      toast({
-        title: hasAppointments ? "Cannot Delete Doctor" : "Error",
-        description: hasAppointments
-          ? "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting."
-          : "Failed to delete doctor",
-        variant: "destructive",
-      });
-    }
-  };
+  //     toast({
+  //       title: hasAppointments ? "Cannot Delete Doctor" : "Error",
+  //       description: hasAppointments
+  //         ? "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting."
+  //         : "Failed to delete doctor",
+  //       variant: "destructive",
+  //     });
+  //   }
+  // };
 
 
 
@@ -1246,7 +1246,46 @@ export default function AdminDoctors() {
   //     }
   //   }
   // };
-const handleToggleStatus = async (doctor: Doctor) => {
+
+
+
+
+
+
+const handleDelete = async (id: string) => {
+  // if (!confirm("Are you sure you want to delete this doctor?")) return;
+
+  try {
+    const token = localStorage.getItem("auth_token");
+    const res = await fetch(
+      `https://smart-teeth-care.runasp.net/api/admin/doctors/${id}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    if (res.ok) {
+      // ✅ 200 — مفيش مواعيد، اتمسح
+      setDoctors((prev) => prev.filter((d) => d.id !== id));
+      toast({ title: "Success", description: "Doctor deleted successfully" });
+    } else {
+      // ✅ 500 — عنده مواعيد
+      toast({
+        title: "Cannot Delete Doctor",
+        description: "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting.",
+        variant: "destructive",
+      });
+    }
+  } catch {
+    toast({
+      title: "Cannot Delete Doctor",
+      description: "This doctor has upcoming appointments. Please wait until all appointments are finished before deleting.",
+      variant: "destructive",
+    });
+  }
+};
+  const handleToggleStatus = async (doctor: Doctor) => {
   const isCurrentlyActive = doctor.isActive !== false;
 
   if (isCurrentlyActive) {

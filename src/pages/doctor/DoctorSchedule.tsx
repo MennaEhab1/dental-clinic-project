@@ -95,6 +95,25 @@ function getWeekDayNameFromDate(dateValue?: string): string {
   return DAYS_OF_WEEK[parsed.getDay()] || "";
 }
 
+function normalizeDayOfWeek(dayValue: unknown): string {
+  if (typeof dayValue === "number" && Number.isInteger(dayValue)) {
+    return DAYS_OF_WEEK[dayValue] || "";
+  }
+
+  const raw = String(dayValue ?? "").trim();
+  if (!raw) return "";
+
+  if (/^\d+$/.test(raw)) {
+    const index = Number(raw);
+    return DAYS_OF_WEEK[index] || "";
+  }
+
+  const matched = DAYS_OF_WEEK.find(
+    (dayName) => dayName.toLowerCase() === raw.toLowerCase(),
+  );
+  return matched || raw;
+}
+
 export default function DoctorSchedulePage() {
   const [schedule, setSchedule] = useState<DoctorSchedule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,7 +157,13 @@ export default function DoctorSchedulePage() {
     doctorScheduleService
       .getSchedule()
       .then((res) => {
-        if (!cancelled) setSchedule(res.data || []);
+        if (!cancelled) {
+          const normalized = (res.data || []).map((slot) => ({
+            ...slot,
+            dayOfWeek: normalizeDayOfWeek(slot.dayOfWeek),
+          }));
+          setSchedule(normalized);
+        }
       })
       .catch(() => {
         if (!cancelled)
@@ -162,7 +187,8 @@ export default function DoctorSchedulePage() {
     const grouped: Record<string, DoctorSchedule[]> = {};
     DAYS_OF_WEEK.forEach((day) => {
       grouped[day] = schedule.filter(
-        (s) => s.dayOfWeek.toLowerCase() === day.toLowerCase(),
+        (s) =>
+          normalizeDayOfWeek(s.dayOfWeek).toLowerCase() === day.toLowerCase(),
       );
     });
     return grouped;
@@ -252,7 +278,7 @@ export default function DoctorSchedulePage() {
     if (!pendingDeleteSlot) return;
     const slot = pendingDeleteSlot;
     const scheduleId = Number(slot.id);
-    const dayLabel = String(slot.dayOfWeek || "").trim();
+    const dayLabel = normalizeDayOfWeek(slot.dayOfWeek);
 
     setPendingDeleteSlot(null);
 
@@ -267,7 +293,7 @@ export default function DoctorSchedulePage() {
         return raw.toLowerCase();
       };
       const currentDoctorId = normalizeDoctorId(resolvedDoctorId ?? user?.id);
-      const scheduleDay = String(slot.dayOfWeek).toLowerCase();
+      const scheduleDay = normalizeDayOfWeek(slot.dayOfWeek).toLowerCase();
 
       const hasBookedAppointmentsInDay = appointments.some((appointment) => {
         if (appointment.status !== "upcoming") return false;

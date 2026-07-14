@@ -8,6 +8,7 @@ interface AppointmentCardProps {
   appointment: Appointment;
   variant?: "default" | "compact";
   viewerRole?: "doctor" | "patient";
+  showPaymentDetails?: boolean;
   onView?: () => void;
   onCancel?: () => void;
 }
@@ -28,6 +29,7 @@ export function AppointmentCard({
   appointment,
   variant = "default",
   viewerRole,
+  showPaymentDetails = true,
   onView,
   onCancel,
 }: AppointmentCardProps) {
@@ -40,9 +42,10 @@ export function AppointmentCard({
   const paymentLabel = appointment.paymentMethod
     ? appointment.paymentMethod
     : "Payment pending";
-  const amountLabel = typeof appointment.amount === "number"
-    ? `EGP ${appointment.amount}`
-    : "Amount not set";
+  const amountLabel =
+    typeof appointment.amount === "number"
+      ? `EGP ${appointment.amount}`
+      : "Amount not set";
 
   const resolveAvatarSrc = (value?: string): string | undefined => {
     const raw = String(value || "").trim();
@@ -68,6 +71,7 @@ export function AppointmentCard({
         : viewerRole === "patient"
           ? doctor
           : doctor || patient;
+    const isDoctorCounterpart = viewerRole === "patient";
     const counterpartName = counterpart
       ? `${counterpart.firstName || ""} ${counterpart.lastName || ""}`.trim() ||
         (viewerRole === "patient" ? "Doctor" : "Patient")
@@ -94,14 +98,22 @@ export function AppointmentCard({
           <p className="text-sm text-muted-foreground">
             {new Date(appointment.date).toLocaleDateString()} at {displayTime}
           </p>
-          <p className="text-sm text-muted-foreground">
-            {amountLabel} • {paymentLabel}
-          </p>
+          {showPaymentDetails && (
+            <p className="text-sm text-muted-foreground">
+              {amountLabel} • {paymentLabel}
+            </p>
+          )}
           {counterpart && counterpartName && (
             <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
               <Avatar className="h-6 w-6">
                 <AvatarImage src={resolveAvatarSrc(counterpart.avatar)} />
-                <AvatarFallback>{counterpartInitials || "U"}</AvatarFallback>
+                <AvatarFallback>
+                  {isDoctorCounterpart ? (
+                    <Stethoscope className="w-3.5 h-3.5" />
+                  ) : (
+                    counterpartInitials || "U"
+                  )}
+                </AvatarFallback>
               </Avatar>
               <span className="truncate">
                 {viewerRole === "patient" ? "Dr. " : ""}
@@ -157,12 +169,14 @@ export function AppointmentCard({
             {displayTime} ({appointment.duration} minutes)
           </span>
         </div>
-        <div className="flex items-center gap-3 text-sm">
-          <DollarSign className="w-4 h-4 text-primary" />
-          <span className="text-muted-foreground">
-            {amountLabel} • {paymentLabel}
-          </span>
-        </div>
+        {showPaymentDetails && (
+          <div className="flex items-center gap-3 text-sm">
+            <DollarSign className="w-4 h-4 text-primary" />
+            <span className="text-muted-foreground">
+              {amountLabel} • {paymentLabel}
+            </span>
+          </div>
+        )}
         {doctor && (
           <div className="flex items-center gap-3 text-sm">
             <Stethoscope className="w-4 h-4 text-primary" />

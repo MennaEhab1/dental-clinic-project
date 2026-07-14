@@ -45,6 +45,11 @@ import type {
   HomeStatisticsDTO,
   HomeTopReviewDTO,
 } from "@/types/swagger";
+import {
+  readPatientProfileCache,
+  writePatientProfileCache,
+  type PatientProfileCacheOwner,
+} from "@/lib/patientProfileCache";
 
 // Real backend API endpoint
 // Use environment variable for flexibility between development and production
@@ -2601,17 +2606,7 @@ export const patientService = {
       updatedAt: new Date().toISOString(),
     } as Patient;
 
-    try {
-      localStorage.setItem(
-        "patient_profile_cache",
-        JSON.stringify(mergedPatient),
-      );
-    } catch (e) {
-      console.warn(
-        "[patientService.update] Failed to cache patient profile",
-        e,
-      );
-    }
+    writeCachedPatientProfile(mergedPatient);
 
     return { data: mergedPatient, success: true };
   },
@@ -2634,21 +2629,30 @@ export const patientService = {
 };
 
 function readCachedPatientProfile(): Patient | null {
-  try {
-    const raw = localStorage.getItem("patient_profile_cache");
-    if (!raw) return null;
-    return JSON.parse(raw) as Patient;
-  } catch {
-    return null;
-  }
+  return readPatientProfileCache(getCurrentPatientCacheOwner());
 }
 
 function writeCachedPatientProfile(profile: Patient): void {
+  writePatientProfileCache(getCurrentPatientCacheOwner(), profile);
+}
+
+function getCurrentPatientCacheOwner(): PatientProfileCacheOwner {
+  const tokenUserId = authService.getCurrentUserIdFromToken();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let storedUser: any = null;
   try {
-    localStorage.setItem("patient_profile_cache", JSON.stringify(profile));
-  } catch (error) {
-    console.warn("[patientService] Failed to cache patient profile", error);
+    const rawUser = localStorage.getItem("auth_user");
+    storedUser = rawUser ? JSON.parse(rawUser) : null;
+  } catch {
+    storedUser = null;
   }
+
+  return {
+    id: tokenUserId || storedUser?.id || storedUser?.userId || null,
+    userId: storedUser?.userId || storedUser?.id || null,
+    email: storedUser?.email || null,
+  };
 }
 
 // Admin Patient Services

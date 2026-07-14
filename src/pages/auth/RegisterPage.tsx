@@ -257,12 +257,10 @@ export default function RegisterPage() {
                   name="gender"
                   value={formData.gender}
                   onChange={handleChange as any}
-                  className="mt-2 w-full p-2 border rounded"
+                  className={`mt-2 w-full px-3 py-2 border rounded-md bg-black/20`}
                 >
-                  <option value="">Prefer not to say</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
-                  <option value="other">Other</option>
                 </select>
               </div>
 

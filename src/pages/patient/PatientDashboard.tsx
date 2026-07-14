@@ -172,6 +172,55 @@ export default function PatientDashboard() {
     .map((part) => part[0]?.toUpperCase() || "")
     .join("");
 
+  const resolveDoctorImageSrc = (value?: string): string | undefined => {
+    const raw = String(value || "").trim();
+    if (!raw) return undefined;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+
+    const baseUrl =
+      import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
+    const normalized = raw.startsWith("/")
+      ? `${baseUrl}${raw}`
+      : `${baseUrl}/${raw}`;
+
+    try {
+      return encodeURI(normalized);
+    } catch {
+      return normalized;
+    }
+  };
+
+  const lastVisitDoctorImage = resolveDoctorImageSrc(
+    lastVisit?.doctor?.avatar ||
+      (
+        lastVisit?.doctor as
+          | (typeof lastVisit.doctor & {
+              profileImage?: string;
+              imageUrl?: string;
+              photo?: string;
+            })
+          | undefined
+      )?.profileImage ||
+      (
+        lastVisit?.doctor as
+          | (typeof lastVisit.doctor & {
+              profileImage?: string;
+              imageUrl?: string;
+              photo?: string;
+            })
+          | undefined
+      )?.imageUrl ||
+      (
+        lastVisit?.doctor as
+          | (typeof lastVisit.doctor & {
+              profileImage?: string;
+              imageUrl?: string;
+              photo?: string;
+            })
+          | undefined
+      )?.photo,
+  );
+
   const stats = [
     {
       label: "Upcoming",
@@ -193,13 +242,6 @@ export default function PatientDashboard() {
       icon: XCircle,
       color: "text-destructive",
       bg: "bg-destructive/10",
-    },
-    {
-      label: "Messages",
-      value: 0,
-      icon: MessageSquare,
-      color: "text-accent",
-      bg: "bg-accent/10",
     },
   ];
 
@@ -225,10 +267,10 @@ export default function PatientDashboard() {
                 Book Appointment
               </Button>
             </Link>
-            <Link to="/patient/records">
+            <Link to="/patient/prescriptions">
               <Button variant="outline">
                 <FileText className="w-4 h-4 mr-2" />
-                View Records
+                View Prescriptions
               </Button>
             </Link>
           </div>
@@ -242,7 +284,7 @@ export default function PatientDashboard() {
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {stats.map((stat, index) => (
             <StatCard key={stat.label} {...stat} delay={index * 0.1} />
           ))}
@@ -294,9 +336,13 @@ export default function PatientDashboard() {
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={lastVisit.doctor?.avatar} />
+                      <AvatarImage src={lastVisitDoctorImage} />
                       <AvatarFallback>
-                        {lastVisitInitials || "DR"}
+                        {lastVisitDoctorImage ? (
+                          lastVisitInitials || "DR"
+                        ) : (
+                          <Stethoscope className="w-4 h-4" />
+                        )}
                       </AvatarFallback>
                     </Avatar>
                     <div>
@@ -338,22 +384,7 @@ export default function PatientDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <div className="grid md:grid-cols-3 gap-4">
-          <Card className="p-5 hover:shadow-card transition-shadow cursor-pointer">
-            <Link to="/patient/messages" className="flex items-start gap-4">
-              <div className="p-3 rounded-xl gradient-bg shrink-0">
-                <MessageSquare className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-foreground mb-1 text-sm">
-                  Message Doctor
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  Send a direct message to your dentist.
-                </p>
-              </div>
-            </Link>
-          </Card>
+        <div className="grid md:grid-cols-2 gap-4">
           <Card className="p-5 hover:shadow-card transition-shadow cursor-pointer">
             <Link to="/patient/records" className="flex items-start gap-4">
               <div className="p-3 rounded-xl bg-success/10 shrink-0">

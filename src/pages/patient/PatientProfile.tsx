@@ -24,6 +24,10 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { authService, patientService } from "@/services/api";
+import {
+  readPatientProfileCache,
+  writePatientProfileCache,
+} from "@/lib/patientProfileCache";
 import type { Patient } from "@/types";
 
 function buildFallbackPatient(
@@ -87,28 +91,11 @@ export default function PatientProfile() {
       const fallback = buildFallbackPatient(user);
 
       const loadCachedPatient = (): Patient | null => {
-        try {
-          const raw = localStorage.getItem("patient_profile_cache");
-          if (!raw) return null;
-          return JSON.parse(raw) as Patient;
-        } catch (error) {
-          console.warn(
-            "[PatientProfile] Failed to parse cached profile",
-            error,
-          );
-          return null;
-        }
+        return readPatientProfileCache(user);
       };
 
       const cachePatient = (profile: Patient) => {
-        try {
-          localStorage.setItem(
-            "patient_profile_cache",
-            JSON.stringify(profile),
-          );
-        } catch (error) {
-          console.warn("[PatientProfile] Failed to cache profile", error);
-        }
+        writePatientProfileCache(user, profile);
       };
 
       try {
@@ -244,15 +231,8 @@ export default function PatientProfile() {
 
       setPatient(updatedPatient);
 
-      try {
-        localStorage.setItem(
-          "patient_profile_cache",
-          JSON.stringify(updatedPatient),
-        );
-        window.dispatchEvent(new Event("patient:profile-updated"));
-      } catch (error) {
-        console.warn("[PatientProfile] Failed to cache updated profile", error);
-      }
+      writePatientProfileCache(user, updatedPatient);
+      window.dispatchEvent(new Event("patient:profile-updated"));
 
       toast({
         title: "Profile Updated",

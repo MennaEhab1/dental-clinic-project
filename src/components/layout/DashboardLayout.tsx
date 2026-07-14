@@ -32,6 +32,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PublicChatWidget } from "@/components/ai/PublicChatWidget";
 import { notificationService } from "@/services/api";
+import { readPatientProfileCache } from "@/lib/patientProfileCache";
 import type { BackendNotification } from "@/services/api";
 
 interface DashboardLayoutProps {
@@ -46,7 +47,7 @@ const patientNav = [
   { icon: Pill, label: "Prescriptions", href: "/patient/prescriptions" },
   { icon: Star, label: "Reviews", href: "/patient/reviews" },
   { icon: Sparkles, label: "AI Analysis", href: "/patient/ai-analysis" },
-  { icon: MessageSquare, label: "Messages", href: "/patient/messages" },
+
   { icon: User, label: "Profile & Settings", href: "/patient/profile" },
 ];
 
@@ -76,7 +77,6 @@ const adminNav = [
   { icon: Stethoscope, label: "Specialities", href: "/admin/specialities" },
 ];
 
-
 export function DashboardLayout({ children, role }: DashboardLayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [cachedPatientAvatar, setCachedPatientAvatar] = useState<string>("");
@@ -92,18 +92,8 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
     if (role !== "patient") return;
 
     const loadCachedAvatar = () => {
-      try {
-        const raw = localStorage.getItem("patient_profile_cache");
-        if (!raw) {
-          setCachedPatientAvatar("");
-          return;
-        }
-
-        const parsed = JSON.parse(raw) as { avatar?: string | null };
-        setCachedPatientAvatar(String(parsed?.avatar || "").trim());
-      } catch {
-        setCachedPatientAvatar("");
-      }
+      const cachedProfile = readPatientProfileCache(user);
+      setCachedPatientAvatar(String(cachedProfile?.avatar || "").trim());
     };
 
     loadCachedAvatar();
@@ -114,7 +104,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
       window.removeEventListener("storage", loadCachedAvatar);
       window.removeEventListener("patient:profile-updated", loadCachedAvatar);
     };
-  }, [role]);
+  }, [role, user]);
 
   useEffect(() => {
     if (role !== "patient" && role !== "doctor") return;
@@ -169,7 +159,17 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
   }, []);
 
   const avatarSrc = useMemo(() => {
-    const raw = String(cachedPatientAvatar || user?.avatar || "").trim();
+    const userImage = String(
+      cachedPatientAvatar ||
+        user?.avatar ||
+        (user as { profileImage?: string })?.profileImage ||
+        (user as { profileImageUrl?: string })?.profileImageUrl ||
+        (user as { imageUrl?: string })?.imageUrl ||
+        (user as { photo?: string })?.photo ||
+        "",
+    ).trim();
+
+    const raw = userImage;
     if (!raw) return "";
     if (/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
 
@@ -183,7 +183,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
     } catch {
       return normalized;
     }
-  }, [cachedPatientAvatar, user?.avatar]);
+  }, [cachedPatientAvatar, user]);
 
   const navItems =
     role === "patient" ? patientNav : role === "doctor" ? doctorNav : adminNav;
@@ -253,7 +253,9 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
             className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-lg z-50"
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <p className="font-medium text-sm">Notifications</p>
+              <p className="font-medium text-sm">
+                {role === "doctor" ? "Doctor Notifications" : "Notifications"}
+              </p>
               <span className="text-xs text-muted-foreground">
                 {unreadCount} unread
               </span>
@@ -322,12 +324,22 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
           <Menu className="w-5 h-5" />
         </Button>
         <Link to="/" className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center">
-            <span className="text-lg font-bold text-primary-foreground">D</span>
-          </div>
-          <span className="font-display font-bold text-foreground">
-            DentalCare
-          </span>
+          <img
+            src="/public/LogoLunare.png"
+            alt="Lunare Logo"
+            className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+          />
         </Link>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -356,14 +368,22 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
           {/* Sidebar Header */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border">
             <Link to="/" className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center">
-                <span className="text-lg font-bold text-primary-foreground">
-                  D
-                </span>
-              </div>
-              <span className="font-display font-bold text-foreground">
-                DentalCare
-              </span>
+              <img
+                src="/public/LogoLunare.png"
+                alt="Lunare Logo"
+                className="
+      h-8
+      sm:h-10
+      md:h-12
+      lg:h-14
+      xl:h-16
+      2xl:h-18
+      w-auto
+      object-contain
+      transition-all
+      duration-300
+    "
+              />
             </Link>
             <Button
               variant="ghost"
@@ -381,8 +401,19 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
               <Avatar className="h-10 w-10">
                 <AvatarImage src={avatarSrc} />
                 <AvatarFallback>
-                  {user?.firstName?.[0]}
-                  {user?.lastName?.[0]}
+                  {avatarSrc ? (
+                    <>
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </>
+                  ) : role === "doctor" ? (
+                    <Stethoscope className="w-4 h-4" />
+                  ) : (
+                    <>
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </>
+                  )}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
@@ -451,8 +482,19 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
             <Avatar className="h-9 w-9">
               <AvatarImage src={avatarSrc} />
               <AvatarFallback>
-                {user?.firstName?.[0]}
-                {user?.lastName?.[0]}
+                {avatarSrc ? (
+                  <>
+                    {user?.firstName?.[0]}
+                    {user?.lastName?.[0]}
+                  </>
+                ) : role === "doctor" ? (
+                  <Stethoscope className="w-4 h-4" />
+                ) : (
+                  <>
+                    {user?.firstName?.[0]}
+                    {user?.lastName?.[0]}
+                  </>
+                )}
               </AvatarFallback>
             </Avatar>
           </div>

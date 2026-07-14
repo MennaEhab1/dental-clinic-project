@@ -25,6 +25,7 @@ import {
   doctorScheduleService,
 } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { readPatientProfileCache } from "@/lib/patientProfileCache";
 import type { Doctor, Service } from "@/types";
 import DepositPage from "./DepositPage";
 
@@ -156,24 +157,7 @@ export default function BookingPage() {
 
   useEffect(() => {
     if (user) {
-      let cachedProfile: {
-        firstName?: string;
-        lastName?: string;
-        email?: string;
-        phone?: string;
-      } | null = null;
-
-      try {
-        const rawCachedProfile = localStorage.getItem("patient_profile_cache");
-        if (rawCachedProfile) {
-          cachedProfile = JSON.parse(rawCachedProfile);
-        }
-      } catch (error) {
-        console.warn(
-          "[BookingPage] Failed to parse cached patient profile",
-          error,
-        );
-      }
+      const cachedProfile = readPatientProfileCache(user);
 
       setBooking((prev) => ({
         ...prev,

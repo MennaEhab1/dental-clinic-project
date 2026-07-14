@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
+import { Calendar, Users, Clock, ArrowRight } from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AppointmentCard } from "@/components/appointments/AppointmentCard";
 import { LoadingCard } from "@/components/common/LoadingSpinner";
@@ -7,98 +9,104 @@ import { StatCard } from "@/components/dashboard/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import {
-  Calendar,
-  Users,
-  Clock,
-  DollarSign,
-  ArrowRight,
-  TrendingUp,
-  Bell,
-} from "lucide-react";
-import { Link } from "react-router-dom";
-import { doctorService, notificationService } from "@/services/api";
-import type {
-  Appointment,
-  DashboardStats,
-  Notification,
-  Patient,
-} from "@/types";
+import { doctorService } from "@/services/api";
 import { useAuth } from "@/contexts/AuthContext";
+import type { Appointment, DashboardStats, Patient } from "@/types";
+
+function toDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getAppointmentDateKey(value: string): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return toDateKey(parsed);
+}
 
 export default function DoctorDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentPatients, setRecentPatients] = useState<Patient[]>([]);
-  const [doctorNotifications, setDoctorNotifications] = useState<
-    Notification[]
-  >([]);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [appointmentsRes, statsRes, notificationsRes] = await Promise.all(
-          [
+        const [appointmentsRes, statsRes] = await Promise.all([
+          doctorService.getAppointments(),
+          doctorService.getDashboard(),
+        ]);
+
+        const todayKey = toDateKey(new Date());
+        let latestAppointments = appointmentsRes.data;
+        let latestStats = statsRes.data;
+
+        // Auto-cancel active appointments that are before today.
+        const staleAppointments = latestAppointments.filter((item) => {
+          if (item.status === "cancelled" || item.status === "complete") {
+            return false;
+          }
+          const dateKey = getAppointmentDateKey(item.date);
+          return !!dateKey && dateKey < todayKey;
+        });
+
+        if (staleAppointments.length > 0) {
+          await Promise.allSettled(
+            staleAppointments.map((item) =>
+              doctorService.cancelAppointment(item.id),
+            ),
+          );
+
+          const [freshAppointmentsRes, freshStatsRes] = await Promise.all([
             doctorService.getAppointments(),
             doctorService.getDashboard(),
-            notificationService.getAll(),
-          ],
-        );
+          ]);
+          latestAppointments = freshAppointmentsRes.data;
+          latestStats = freshStatsRes.data;
+        }
 
-        setAppointments(appointmentsRes.data);
-        setStats(statsRes.data);
+        setAppointments(latestAppointments);
 
-        const byAppointment = appointmentsRes.data
+        const uniquePatients = latestAppointments
           .map((item) => item.patient)
           .filter((item): item is Patient => !!item)
           .filter(
             (item, index, array) =>
               array.findIndex((entry) => entry.id === item.id) === index,
-          )
-          .slice(0, 5);
+          );
 
-        setRecentPatients(byAppointment);
+        setRecentPatients(uniquePatients.slice(0, 5));
 
-        // Use real notifications from backend; fall back to appointment-derived ones
-        if (notificationsRes.success && notificationsRes.data.length > 0) {
-          const backendNotifications: Notification[] =
-            notificationsRes.data.map((n) => ({
-              id: String(n.id),
-              userId: user?.id || "",
-              title: n.message,
-              message: n.message,
-              type: "appointment" as const,
-              isRead: n.isRead,
-              createdAt: n.createdAt,
-            }));
-          setDoctorNotifications(backendNotifications);
-        } else {
-          const notifications: Notification[] = appointmentsRes.data
-            .slice(0, 4)
-            .map((appointment) => ({
-              id: `notification-${appointment.id}`,
-              userId: user?.id || "doctor-local",
-              title: `Appointment ${appointment.status}`,
-              message:
-                `${appointment.patient?.firstName || "Patient"} ${appointment.patient?.lastName || ""} • ${appointment.date} ${appointment.time}`.trim(),
-              type: "appointment" as const,
-              isRead:
-                appointment.status === "complete" ||
-                appointment.status === "cancelled",
-              createdAt: appointment.updatedAt || appointment.createdAt,
-            }));
-          setDoctorNotifications(notifications);
-        }
+        const fallbackPatientCount = new Set(
+          latestAppointments
+            .map((item) => item.patient?.id || item.patientId)
+            .filter(Boolean),
+        ).size;
+
+        setStats({
+          ...latestStats,
+          totalPatients:
+            latestStats.totalPatients > 0
+              ? latestStats.totalPatients
+              : fallbackPatientCount,
+        });
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {
         setIsLoading(false);
       }
     };
-    fetchData();
-  }, [user]);
+
+    void fetchData();
+  }, []);
 
   const dashboardStats = [
     {
@@ -122,23 +130,21 @@ export default function DoctorDashboard() {
       color: "text-warning",
       bg: "bg-warning/10",
     },
-    {
-      label: "Revenue",
-      value: `$${(stats?.revenue || 0).toLocaleString()}`,
-      icon: DollarSign,
-      color: "text-success",
-      bg: "bg-success/10",
-    },
   ];
 
-  const todayAppointments = appointments.filter(
-    (a) => a.status !== "cancelled" && a.status !== "complete",
-  );
+  const todayKey = toDateKey(new Date());
+  const todayAppointments = appointments.filter((item) => {
+    const dateKey = getAppointmentDateKey(item.date);
+    return (
+      dateKey === todayKey &&
+      item.status !== "cancelled" &&
+      item.status !== "complete"
+    );
+  });
 
   return (
     <DashboardLayout role="doctor">
       <div className="space-y-6">
-        {/* Welcome Section */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -154,24 +160,16 @@ export default function DoctorDashboard() {
                 today.
               </p>
             </div>
-            <div className="hidden md:flex items-center gap-2 bg-card rounded-lg px-4 py-2">
-              <TrendingUp className="w-5 h-5 text-success" />
-              <span className="text-sm font-medium text-foreground">
-                +12% this week
-              </span>
-            </div>
           </div>
         </motion.div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {dashboardStats.map((stat, index) => (
             <StatCard key={stat.label} {...stat} delay={index * 0.1} />
           ))}
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Today's Appointments */}
           <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg font-display">
@@ -195,6 +193,7 @@ export default function DoctorDashboard() {
                       appointment={appointment}
                       variant="compact"
                       viewerRole="doctor"
+                      showPaymentDetails={false}
                     />
                   ))}
                 </div>
@@ -209,41 +208,7 @@ export default function DoctorDashboard() {
             </CardContent>
           </Card>
 
-          {/* Sidebar: Notifications + Patients */}
           <div className="space-y-6">
-            {/* Notifications */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg font-display flex items-center gap-2">
-                  <Bell className="w-4 h-4" /> Notifications
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {doctorNotifications.length > 0 ? (
-                    doctorNotifications.slice(0, 4).map((notif) => (
-                      <div
-                        key={notif.id}
-                        className={`p-3 rounded-lg border text-sm ${notif.isRead ? "border-border" : "border-primary/30 bg-primary/5"}`}
-                      >
-                        <p className="font-medium text-foreground text-xs">
-                          {notif.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {notif.message}
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No new notifications
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Patients */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-lg font-display">
@@ -266,8 +231,8 @@ export default function DoctorDashboard() {
                       <Avatar className="h-9 w-9">
                         <AvatarImage src={patient.avatar} />
                         <AvatarFallback>
-                          {patient.firstName[0]}
-                          {patient.lastName[0]}
+                          {patient.firstName?.[0] || "P"}
+                          {patient.lastName?.[0] || "T"}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">

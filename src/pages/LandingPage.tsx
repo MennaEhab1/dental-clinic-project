@@ -387,9 +387,10 @@ export default function LandingPage() {
 
           <div className="grid md:grid-cols-3 gap-6">
             {topReviews.map((review, index) => (
-              <BorderGlow>
+              <BorderGlow
+                key={`${review.patientName}-${review.comment.slice(0, 20)}-${index}`}
+              >
                 <motion.div
-                  key={`${review.patientName}-${index}`}
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
@@ -488,8 +489,7 @@ export default function LandingPage() {
           </motion.div>
         </div>
       </section>
-            <PublicChatWidget />
-
+      <PublicChatWidget />
     </MainLayout>
   );
 }

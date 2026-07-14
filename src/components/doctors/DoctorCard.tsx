@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Star, MessageSquare } from "lucide-react";
+import { Star, MessageSquare, Stethoscope } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,48 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
       .join(" ")
       .trim() || "Doctor";
 
+  const resolveDoctorImageSrc = (value?: string): string | undefined => {
+    const raw = String(value || "").trim();
+    if (!raw) return undefined;
+    if (/^https?:\/\//i.test(raw) || raw.startsWith("data:")) return raw;
+
+    const baseUrl =
+      import.meta.env.VITE_API_URL || "https://smart-teeth-care.runasp.net";
+    const normalized = raw.startsWith("/")
+      ? `${baseUrl}${raw}`
+      : `${baseUrl}/${raw}`;
+    try {
+      return encodeURI(normalized);
+    } catch {
+      return normalized;
+    }
+  };
+
+  const doctorImage = resolveDoctorImageSrc(
+    doctor.avatar ||
+      (
+        doctor as Doctor & {
+          profileImage?: string;
+          imageUrl?: string;
+          photo?: string;
+        }
+      ).profileImage ||
+      (
+        doctor as Doctor & {
+          profileImage?: string;
+          imageUrl?: string;
+          photo?: string;
+        }
+      ).imageUrl ||
+      (
+        doctor as Doctor & {
+          profileImage?: string;
+          imageUrl?: string;
+          photo?: string;
+        }
+      ).photo,
+  );
+
   if (variant === "compact") {
     return (
       <>
@@ -64,11 +106,17 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
           whileHover={{ y: -2 }}
           className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border hover:shadow-soft transition-shadow"
         >
-          <img
-            src={doctor.avatar}
-            alt={`Dr. ${fullName}`}
-            className="w-14 h-14 rounded-xl object-cover"
-          />
+          {doctorImage ? (
+            <img
+              src={doctorImage}
+              alt={`Dr. ${fullName}`}
+              className="w-14 h-14 rounded-xl object-cover"
+            />
+          ) : (
+            <div className="w-14 h-14 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <Stethoscope className="w-7 h-7" />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <h4 className="font-medium text-foreground truncate">
               Dr. {fullName}
@@ -107,74 +155,82 @@ export function DoctorCard({ doctor, variant = "default" }: DoctorCardProps) {
   return (
     <>
       <motion.div whileHover={{ y: -4 }} transition={{ duration: 0.2 }}>
-      <Card className="overflow-hidden shadow-card hover:shadow-elevated transition-shadow">
-        <div className="relative">
-          <img
-            src={doctor.avatar}
-            alt={`Dr. ${fullName}`}
-            className="w-full h-56 object-cover"
-          />
-          <div className="absolute top-3 right-3">
-            <Badge className={`${specialtyColors[doctor.specialty]} border-0`}>
-              {specialtyLabels[doctor.specialty]}
-            </Badge>
-          </div>
-        </div>
-        <CardContent className="p-5">
-          <div className="flex items-start justify-between mb-3">
-            <div>
-              <h3 className="font-display font-semibold text-lg text-foreground">
-                Dr. {fullName}
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                {doctor.experience} years experience
-              </p>
-            </div>
-            <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-lg">
-              <Star className="w-4 h-4 text-warning fill-warning" />
-              <span className="text-sm font-medium">
-                {averageRating.toFixed(1)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                ({totalReviews})
-              </span>
-            </div>
-          </div>
-          <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-            {doctor.bio}
-          </p>
-          <div className="flex items-center gap-2 mb-4">
-            {doctor.qualifications.slice(0, 2).map((qual) => (
-              <Badge key={qual} variant="secondary" className="text-xs">
-                {qual}
-              </Badge>
-            ))}
-          </div>
-          <div className="flex items-center justify-between pt-4 border-t border-border">
-            <div>
-              <span className="text-xs text-muted-foreground">
-                Consultation
-              </span>
-              <p className="font-semibold text-primary">
-                ${doctor.consultationFee}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setReviewsOpen(true)}
+        <Card className="overflow-hidden shadow-card hover:shadow-elevated transition-shadow">
+          <div className="relative">
+            {doctorImage ? (
+              <img
+                src={doctorImage}
+                alt={`Dr. ${fullName}`}
+                className="w-full h-56 object-cover"
+              />
+            ) : (
+              <div className="w-full h-56 bg-primary/10 text-primary flex items-center justify-center">
+                <Stethoscope className="w-16 h-16" />
+              </div>
+            )}
+            <div className="absolute top-3 right-3">
+              <Badge
+                className={`${specialtyColors[doctor.specialty]} border-0`}
               >
-                <MessageSquare className="w-4 h-4 mr-2" />
-                Reviews
-              </Button>
-              <Link to={`/booking?doctor=${doctor.id}`}>
-                <Button className="gradient-bg border-0">Book Now</Button>
-              </Link>
+                {specialtyLabels[doctor.specialty]}
+              </Badge>
             </div>
           </div>
-        </CardContent>
-      </Card>
+          <CardContent className="p-5">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="font-display font-semibold text-lg text-foreground">
+                  Dr. {fullName}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {doctor.experience} years experience
+                </p>
+              </div>
+              <div className="flex items-center gap-1 bg-muted px-2 py-1 rounded-lg">
+                <Star className="w-4 h-4 text-warning fill-warning" />
+                <span className="text-sm font-medium">
+                  {averageRating.toFixed(1)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  ({totalReviews})
+                </span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
+              {doctor.bio}
+            </p>
+            <div className="flex items-center gap-2 mb-4">
+              {doctor.qualifications.slice(0, 2).map((qual) => (
+                <Badge key={qual} variant="secondary" className="text-xs">
+                  {qual}
+                </Badge>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-4 border-t border-border">
+              <div>
+                <span className="text-xs text-muted-foreground">
+                  Consultation
+                </span>
+                <p className="font-semibold text-primary">
+                  ${doctor.consultationFee}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setReviewsOpen(true)}
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Reviews
+                </Button>
+                <Link to={`/booking?doctor=${doctor.id}`}>
+                  <Button className="gradient-bg border-0">Book Now</Button>
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </motion.div>
       <DoctorReviewsDialog
         doctor={doctor}

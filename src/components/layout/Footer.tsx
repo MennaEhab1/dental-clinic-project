@@ -48,7 +48,7 @@ export function Footer() {
           <div className="lg:col-span-1">
             <Link to="/" className="flex items-center gap-2 mb-4">
               <img
-                src="/public/LogoLunare.png"
+                src="/LogoLunare.png"
                 alt="Lunare Logo"
                 className="
       h-8

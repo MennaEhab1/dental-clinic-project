@@ -325,7 +325,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
         </Button>
         <Link to="/" className="flex items-center gap-2">
           <img
-            src="/public/LogoLunare.png"
+            src="/LogoLunare.png"
             alt="Lunare Logo"
             className="
       h-8

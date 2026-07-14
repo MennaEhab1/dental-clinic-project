@@ -65,7 +65,7 @@ export function Header() {
             </span> */}
             {/* <img src="/public/Logo.png" alt="" className="h-16 w-auto" /> */}
             <img
-              src="./public/LogoLunare.png"
+              src="/LogoLunare.png"
               alt="Lunare Logo"
               className="
       h-8

@@ -147,7 +147,7 @@ export default function LoginPage() {
         >
           <Link to="/" className="flex items-center justify-center gap-2 mb-8">
             <img
-              src="/public/LogoLunare.png"
+              src="/LogoLunare.png"
               alt="Lunare Logo"
               className="
       h-8

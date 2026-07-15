@@ -941,13 +941,13 @@ export default function AdminPharmacy() {
 
         {/* Pharmacy Create/Edit Dialog */}
         <Dialog open={pharmacyDialogOpen} onOpenChange={setPharmacyDialogOpen}>
-          <DialogContent className="max-w-md max-h-[90vh] px-4 py-7">
-            <DialogHeader>
+          <DialogContent className="max-w-md max-h-[90vh] flex flex-col p-0 gap-0">
+            <DialogHeader className="px-6 pt-6 pb-2">
               <DialogTitle className="font-display">
                 {editingPharmacy ? "Edit Pharmacy" : "Add Pharmacy"}
               </DialogTitle>
             </DialogHeader>
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6 space-y-4">
               <div className="space-y-2">
                 <Label>Pharmacy Name</Label>
                 <Input

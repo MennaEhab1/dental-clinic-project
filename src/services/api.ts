@@ -804,6 +804,23 @@ async function apiCall<T>(
     // For resource 401s — attempt a silent token refresh then retry once.
     // This handles the common case where the access token has simply expired.
     if (isUnauthorizedResponse) {
+      // Login endpoint: don't try refresh token
+if (endpoint.includes("/api/Account/login")) {
+  const msg =
+    typeof data === "string"
+      ? data
+      : (data as Record<string, unknown>)?.message ||
+        "Invalid Email or Password";
+const message =
+  typeof data === "string"
+    ? data
+    : String(
+        (data as Record<string, unknown>)?.message ??
+          "Invalid Email or Password",
+      );
+
+throw new Error(message);
+}
       const storedRefreshToken = getRefreshToken();
       const isRefreshEndpoint = endpoint.includes("/api/Account/RefreshToken");
 
@@ -1051,6 +1068,12 @@ async function apiCall<T>(
       "Full response body:",
       data,
     );
+    if (
+  endpoint.includes("/api/Account/login") &&
+  response.status === 401
+) {
+  throw new Error("Invalid email or password");
+}
     throw new Error(errorMessage);
   }
 

@@ -36,7 +36,19 @@ export default function RegisterPage() {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
   };
+const today = new Date();
 
+const maxDate = new Date(
+  today.getFullYear() - 1,
+  today.getMonth(),
+  today.getDate(),
+);
+
+const minDate = new Date(
+  today.getFullYear() - 120,
+  today.getMonth(),
+  today.getDate(),
+);
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
@@ -243,14 +255,30 @@ export default function RegisterPage() {
 
               <div>
                 <Label htmlFor="dateOfBirth">Date of birth</Label>
-                <Input
+                {/* <Input
                   id="dateOfBirth"
                   name="dateOfBirth"
                   type="date"
                   value={formData.dateOfBirth}
                   onChange={handleChange}
                   className={`mt-2 ${errors.dateOfBirth ? "border-destructive" : ""}`}
-                />
+                /> */}
+                <Input
+  id="dateOfBirth"
+  name="dateOfBirth"
+  type="date"
+  value={formData.dateOfBirth}
+  onChange={handleChange}
+  min={minDate.toISOString().split("T")[0]}
+  max={maxDate.toISOString().split("T")[0]}
+  className={`mt-2 ${errors.dateOfBirth ? "border-destructive" : ""}`}
+/>
+
+{errors.dateOfBirth && (
+  <p className="text-xs text-destructive mt-1">
+    {errors.dateOfBirth}
+  </p>
+)}
                 {errors.dateOfBirth && (
                   <p className="text-xs text-destructive mt-1">
                     {errors.dateOfBirth}

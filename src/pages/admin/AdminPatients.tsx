@@ -29,6 +29,26 @@ interface AdminPatient {
 }
 
 const BASE_URL = "https://smart-teeth-care.runasp.net";
+const MIN_AGE = 1;
+const MAX_AGE = 120;
+
+const today = new Date();
+
+const maxDate = new Date(
+  today.getFullYear() - MIN_AGE,
+  today.getMonth(),
+  today.getDate(),
+)
+  .toISOString()
+  .split("T")[0];
+
+const minDate = new Date(
+  today.getFullYear() - MAX_AGE,
+  today.getMonth(),
+  today.getDate(),
+)
+  .toISOString()
+  .split("T")[0];
 const getToken = () => localStorage.getItem("auth_token") || "";
 
 export default function AdminPatients() {
@@ -301,7 +321,7 @@ export default function AdminPatients() {
                   </select>
                 </div>
 
-                <div className="space-y-2">
+                {/* <div className="space-y-2">
                   <Label>Date Of Birth</Label>
                   <Input
                     type="date"
@@ -310,7 +330,22 @@ export default function AdminPatients() {
                       setFormData({ ...formData, dateOfBirth: e.target.value })
                     }
                   />
-                </div>
+                </div> */}
+                <div className="space-y-2">
+  <Label>Date Of Birth</Label>
+  <Input
+    type="date"
+    value={formData.dateOfBirth}
+    min={minDate}
+    max={maxDate}
+    onChange={(e) =>
+      setFormData({ ...formData, dateOfBirth: e.target.value })
+    }
+  />
+  <p className="text-xs text-muted-foreground">
+    Age must be between {MIN_AGE} and {MAX_AGE} years.
+  </p>
+</div>
 
                 <div className="flex gap-2 pt-2">
                   <Button

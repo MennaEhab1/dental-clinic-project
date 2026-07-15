@@ -171,6 +171,23 @@ export default function BookingPage() {
     }
   }, [user]);
 
+
+
+  useEffect(() => {
+  const serviceId = searchParams.get("service");
+
+  if (serviceId) {
+    setBooking((prev) => ({
+      ...prev,
+      serviceId,
+      doctorId: "", // علشان يختار دكتور جديد
+      date: "",
+      time: "",
+    }));
+
+    setCurrentStep("doctor");
+  }
+}, [searchParams]);
   const selectedService = services.find((s) => s.id === booking.serviceId);
   const selectedDoctor = doctors.find((d) => d.id === booking.doctorId);
 

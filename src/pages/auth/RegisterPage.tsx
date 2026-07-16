@@ -36,19 +36,19 @@ export default function RegisterPage() {
       setErrors((prev) => ({ ...prev, [name]: "" }));
     }
   };
-const today = new Date();
+  const today = new Date();
 
-const maxDate = new Date(
-  today.getFullYear() - 1,
-  today.getMonth(),
-  today.getDate(),
-);
+  const maxDate = new Date(
+    today.getFullYear() - 1,
+    today.getMonth(),
+    today.getDate(),
+  );
 
-const minDate = new Date(
-  today.getFullYear() - 120,
-  today.getMonth(),
-  today.getDate(),
-);
+  const minDate = new Date(
+    today.getFullYear() - 120,
+    today.getMonth(),
+    today.getDate(),
+  );
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
 
@@ -190,7 +190,7 @@ const minDate = new Date(
         >
           <Link to="/" className="flex items-center justify-center gap-2 mb-8">
             <img
-              src="/public/LogoLunare.png"
+              src="/LogoLunare.png"
               alt="Lunare Logo"
               className="
       h-8
@@ -264,21 +264,21 @@ const minDate = new Date(
                   className={`mt-2 ${errors.dateOfBirth ? "border-destructive" : ""}`}
                 /> */}
                 <Input
-  id="dateOfBirth"
-  name="dateOfBirth"
-  type="date"
-  value={formData.dateOfBirth}
-  onChange={handleChange}
-  min={minDate.toISOString().split("T")[0]}
-  max={maxDate.toISOString().split("T")[0]}
-  className={`mt-2 ${errors.dateOfBirth ? "border-destructive" : ""}`}
-/>
+                  id="dateOfBirth"
+                  name="dateOfBirth"
+                  type="date"
+                  value={formData.dateOfBirth}
+                  onChange={handleChange}
+                  min={minDate.toISOString().split("T")[0]}
+                  max={maxDate.toISOString().split("T")[0]}
+                  className={`mt-2 ${errors.dateOfBirth ? "border-destructive" : ""}`}
+                />
 
-{errors.dateOfBirth && (
-  <p className="text-xs text-destructive mt-1">
-    {errors.dateOfBirth}
-  </p>
-)}
+                {errors.dateOfBirth && (
+                  <p className="text-xs text-destructive mt-1">
+                    {errors.dateOfBirth}
+                  </p>
+                )}
                 {errors.dateOfBirth && (
                   <p className="text-xs text-destructive mt-1">
                     {errors.dateOfBirth}

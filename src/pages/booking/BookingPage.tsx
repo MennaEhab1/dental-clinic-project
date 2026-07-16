@@ -188,7 +188,39 @@ export default function BookingPage() {
     setCurrentStep("doctor");
   }
 }, [searchParams]);
-  const selectedService = services.find((s) => s.id === booking.serviceId);
+  useEffect(() => {
+  const doctorId = searchParams.get("doctor");
+
+  if (!doctorId || doctors.length === 0) return;
+
+  const doctor = doctors.find((d) => String(d.id) === doctorId);
+
+  if (!doctor) return;
+
+  const service = services.find((s) => {
+    const specializationId = (
+      doctor as unknown as { specializationId?: number | null }
+    ).specializationId;
+
+    if (specializationId != null) {
+      return String(s.id) === String(specializationId);
+    }
+
+    return s.specialty === doctor.specialty;
+  });
+
+  setBooking((prev) => ({
+    ...prev,
+    doctorId,
+    serviceId: service?.id || prev.serviceId,
+    date: "",
+    time: "",
+  }));
+
+  // نبدأ من اختيار التاريخ
+  setCurrentStep("datetime");
+}, [searchParams, doctors, services]);
+const selectedService = services.find((s) => s.id === booking.serviceId);
   const selectedDoctor = doctors.find((d) => d.id === booking.doctorId);
 
   const filteredDoctors = booking.serviceId
@@ -285,7 +317,7 @@ export default function BookingPage() {
     };
   }, [booking.doctorId, booking.date]);
 
-  useEffect(() => {
+   useEffect(() => {  
     if (currentStep === "doctor") {
       console.debug("[BookingPage] Doctor filtering in effect:", {
         selectedServiceId: booking.serviceId,

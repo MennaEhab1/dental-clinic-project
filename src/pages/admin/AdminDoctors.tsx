@@ -56,6 +56,7 @@ interface DoctorFormData {
   specialityID: number;
   workingHours?: number;
   consultationFee?: number;
+  profileImageUrl?: string;
 }
 
 export default function AdminDoctors() {
@@ -84,6 +85,7 @@ export default function AdminDoctors() {
     specialityID: 0,
     workingHours: 0,
     consultationFee: 0,
+    profileImageUrl: "",
   });
 
   useEffect(() => {
@@ -243,6 +245,7 @@ export default function AdminDoctors() {
       specialityID: matchedSpec?.id ?? defaultId,
       workingHours: doctor.workingHours ?? doctor.experience ?? 0,
       consultationFee: doctor.consultationFee ?? doctor.salary ?? 0,
+      profileImageUrl: String((doctor as { avatar?: string }).avatar || ""),
     };
   };
   const handleOpenDialog = async (doctor?: Doctor) => {
@@ -289,6 +292,7 @@ export default function AdminDoctors() {
         specialityID: defaultId,
         workingHours: 0,
         consultationFee: 0,
+        profileImageUrl: "",
       });
     }
 
@@ -390,6 +394,7 @@ export default function AdminDoctors() {
       salary: Math.max(0, Number(formData.consultationFee ?? 0)),
       workingHours: Math.max(0, Number(formData.workingHours ?? 0)),
       specialityID: formData.specialityID,
+      imageUrl: (formData.profileImageUrl ?? "").trim() || undefined,
     };
     const serviceData = editingDoctor ? updatePayload : createPayload;
 
@@ -433,6 +438,10 @@ export default function AdminDoctors() {
                     d.experience,
                   specialty: updatedDoctor.specialty || d.specialty,
                   email: updatedDoctor.email || d.email,
+                  avatar:
+                    updatedDoctor.avatar ||
+                    (formData.profileImageUrl ?? "").trim() ||
+                    d.avatar,
                 }
               : d,
           ),
@@ -449,6 +458,19 @@ export default function AdminDoctors() {
         if (!response.success) {
           throw new Error(response.message || "Failed to create doctor");
         }
+
+        const createdDoctorId = response.data?.id;
+        const imageUrl = (formData.profileImageUrl ?? "").trim();
+        if (createdDoctorId && imageUrl) {
+          await adminDoctorService.update(createdDoctorId, {
+            fullName: formData.fullName.trim(),
+            salary: Math.max(0, Number(formData.consultationFee ?? 0)),
+            workingHours: Math.max(0, Number(formData.workingHours ?? 0)),
+            specialityID: formData.specialityID,
+            imageUrl,
+          } as unknown as Partial<Doctor>);
+        }
+
         toast({ title: "Success", description: "Doctor created successfully" });
       }
       await fetchDoctors();
@@ -849,6 +871,26 @@ export default function AdminDoctors() {
                       }
                     />
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Profile Image URL</Label>
+                  <Input
+                    type="url"
+                    placeholder="https://example.com/doctor.jpg"
+                    value={formData.profileImageUrl || ""}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        profileImageUrl: e.target.value,
+                      })
+                    }
+                  />
+                  {!editingDoctor && (
+                    <p className="text-xs text-muted-foreground">
+                      Swagger supports imageUrl on update. For new doctors,
+                      image URL will be applied immediately after creation.
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-2 pt-2">
                   <Button

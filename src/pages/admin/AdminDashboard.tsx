@@ -289,7 +289,56 @@ export default function AdminDashboard() {
                   >
                     <div className="flex items-center gap-3">
                       <Avatar className="h-9 w-9">
-                        <AvatarImage src={doctor.avatar} />
+                        <AvatarImage
+                          src={
+                            doctor.avatar ||
+                            (
+                              doctor as Doctor & {
+                                profileImageUrl?: string;
+                                profileImage?: string;
+                                imageUrl?: string;
+                                profilePicture?: string;
+                                photo?: string;
+                              }
+                            ).profileImageUrl ||
+                            (
+                              doctor as Doctor & {
+                                profileImageUrl?: string;
+                                profileImage?: string;
+                                imageUrl?: string;
+                                profilePicture?: string;
+                                photo?: string;
+                              }
+                            ).profileImage ||
+                            (
+                              doctor as Doctor & {
+                                profileImageUrl?: string;
+                                profileImage?: string;
+                                imageUrl?: string;
+                                profilePicture?: string;
+                                photo?: string;
+                              }
+                            ).imageUrl ||
+                            (
+                              doctor as Doctor & {
+                                profileImageUrl?: string;
+                                profileImage?: string;
+                                imageUrl?: string;
+                                profilePicture?: string;
+                                photo?: string;
+                              }
+                            ).profilePicture ||
+                            (
+                              doctor as Doctor & {
+                                profileImageUrl?: string;
+                                profileImage?: string;
+                                imageUrl?: string;
+                                profilePicture?: string;
+                                photo?: string;
+                              }
+                            ).photo
+                          }
+                        />
                         <AvatarFallback>
                           {doctor.firstName[0]}
                           {doctor.lastName[0]}

@@ -805,22 +805,22 @@ async function apiCall<T>(
     // This handles the common case where the access token has simply expired.
     if (isUnauthorizedResponse) {
       // Login endpoint: don't try refresh token
-if (endpoint.includes("/api/Account/login")) {
-  const msg =
-    typeof data === "string"
-      ? data
-      : (data as Record<string, unknown>)?.message ||
-        "Invalid Email or Password";
-const message =
-  typeof data === "string"
-    ? data
-    : String(
-        (data as Record<string, unknown>)?.message ??
-          "Invalid Email or Password",
-      );
+      if (endpoint.includes("/api/Account/login")) {
+        const msg =
+          typeof data === "string"
+            ? data
+            : (data as Record<string, unknown>)?.message ||
+              "Invalid Email or Password";
+        const message =
+          typeof data === "string"
+            ? data
+            : String(
+                (data as Record<string, unknown>)?.message ??
+                  "Invalid Email or Password",
+              );
 
-throw new Error(message);
-}
+        throw new Error(message);
+      }
       const storedRefreshToken = getRefreshToken();
       const isRefreshEndpoint = endpoint.includes("/api/Account/RefreshToken");
 
@@ -1068,12 +1068,9 @@ throw new Error(message);
       "Full response body:",
       data,
     );
-    if (
-  endpoint.includes("/api/Account/login") &&
-  response.status === 401
-) {
-  throw new Error("Invalid email or password");
-}
+    if (endpoint.includes("/api/Account/login") && response.status === 401) {
+      throw new Error("Invalid email or password");
+    }
     throw new Error(errorMessage);
   }
 
@@ -4131,6 +4128,21 @@ export const adminDoctorService = {
         : null);
 
     const { firstName, lastName } = splitName(rawName);
+    const normalizedAvatar =
+      resolveBackendAssetUrl(
+        doc.avatar ??
+          doc.imageUrl ??
+          doc.profileImage ??
+          doc.profileImageUrl ??
+          doc.profilePicture ??
+          doc.photo,
+      ) ||
+      doc.avatar ||
+      doc.imageUrl ||
+      doc.profileImage ||
+      doc.profileImageUrl ||
+      doc.profilePicture ||
+      doc.photo;
 
     return {
       id: String(doc.id ?? ""),
@@ -4138,7 +4150,7 @@ export const adminDoctorService = {
       phone: doc.phone ?? doc.phoneNumber ?? "",
       firstName: doc.firstName ?? firstName,
       lastName: doc.lastName ?? lastName,
-      avatar: doc.avatar ?? doc.imageUrl ?? doc.profileImage,
+      avatar: normalizedAvatar,
       role: "doctor" as const,
       specialty: normalizeSpecialty(
         doc.specialty ?? doc.specializationName ?? doc.specialityName,
@@ -4236,9 +4248,41 @@ export const adminDoctorService = {
         throw new Error("Invalid response format - expected array");
       }
 
-      const doctors = (res.data as unknown[]).map((doc) =>
+      let doctors = (res.data as unknown[]).map((doc) =>
         adminDoctorService.mapBackendToDoctor(doc),
       );
+
+      // Admin doctor endpoints currently omit image fields in many responses.
+      // Enrich missing avatars from lookup doctors endpoint when available.
+      const hasMissingImages = doctors.some((doctor) => !doctor.avatar);
+      if (hasMissingImages) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lookupRes = await apiCall<any[]>("/api/Lookup/Doctors", {
+            method: "GET",
+          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lookupItems = (lookupRes.data || []) as any[];
+          const imageById = new Map<string, string>();
+
+          for (const item of lookupItems) {
+            const image = resolveBackendAssetUrl(
+              item?.imageUrl ?? item?.profileImage ?? item?.avatar,
+            );
+            const idKey = String(item?.id ?? "").trim();
+            if (idKey && image) {
+              imageById.set(idKey, image);
+            }
+          }
+
+          doctors = doctors.map((doctor) => ({
+            ...doctor,
+            avatar: doctor.avatar || imageById.get(String(doctor.id)) || "",
+          }));
+        } catch {
+          // Non-critical: keep admin payload as-is if lookup enrichment fails.
+        }
+      }
 
       console.debug(
         "[adminDoctorService.getAll] ✅ Successfully mapped doctors:",
@@ -4267,6 +4311,29 @@ export const adminDoctorService = {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = res.data as any;
       const doctor = adminDoctorService.mapBackendToDoctor(doc);
+
+      if (!doctor.avatar) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lookupRes = await apiCall<any[]>("/api/Lookup/Doctors", {
+            method: "GET",
+          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lookupItems = (lookupRes.data || []) as any[];
+          const matched = lookupItems.find(
+            (item) => String(item?.id ?? "") === String(doctor.id),
+          );
+          const enrichedAvatar = resolveBackendAssetUrl(
+            matched?.imageUrl ?? matched?.profileImage ?? matched?.avatar,
+          );
+          if (enrichedAvatar) {
+            doctor.avatar = enrichedAvatar;
+          }
+        } catch {
+          // Non-critical: keep admin payload as-is if lookup enrichment fails.
+        }
+      }
+
       return { data: doctor, success: true };
     } catch (error) {
       console.error("[adminDoctorService.getById] Error:", error);
@@ -4362,6 +4429,11 @@ export const adminDoctorService = {
         salary: Math.max(0, Number(d.salary ?? 0)),
         workingHours: Math.max(0, Number(d.workingHours ?? 0)),
         specialityID,
+        imageUrl:
+          (d.imageUrl as string | undefined)?.trim() ||
+          (d.profileImageUrl as string | undefined)?.trim() ||
+          (d.avatar as string | undefined)?.trim() ||
+          undefined,
       };
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

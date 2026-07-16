@@ -51,6 +51,41 @@ const minDate = new Date(
   .split("T")[0];
 const getToken = () => localStorage.getItem("auth_token") || "";
 
+const normalizeImageUrl = (value: unknown): string | null => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/")) return `${BASE_URL}${raw}`;
+  return `${BASE_URL}/${raw}`;
+};
+
+const mapAdminPatient = (item: unknown): AdminPatient | null => {
+  if (!item || typeof item !== "object") return null;
+  const patient = item as Record<string, unknown>;
+  const id = Number(patient.id ?? patient.patientId ?? 0);
+  if (!id) return null;
+
+  return {
+    id,
+    patientName: String(
+      patient.patientName ??
+        patient.fullName ??
+        patient.name ??
+        patient.userName ??
+        "Unknown Patient",
+    ),
+    email: String(patient.email ?? ""),
+    phone: String(patient.phone ?? patient.phoneNumber ?? ""),
+    gender: String(patient.gender ?? ""),
+    profileImageUrl: normalizeImageUrl(
+      patient.profileImageUrl ??
+        patient.profileImage ??
+        patient.profilePicture ??
+        patient.avatar,
+    ),
+  };
+};
+
 export default function AdminPatients() {
   const [patients, setPatients] = useState<AdminPatient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -110,7 +145,12 @@ export default function AdminPatients() {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
-      setPatients(Array.isArray(data) ? data : []);
+      const mapped = Array.isArray(data)
+        ? data
+            .map((item) => mapAdminPatient(item))
+            .filter((patient): patient is AdminPatient => patient !== null)
+        : [];
+      setPatients(mapped);
     } catch (error) {
       console.error("Failed to fetch patients:", error);
       toast({
@@ -128,7 +168,8 @@ export default function AdminPatients() {
       const res = await fetch(`${BASE_URL}/api/adminPatient/${id}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-      return await res.json();
+      const data = await res.json();
+      return mapAdminPatient(data);
     } catch {
       return null;
     }
@@ -332,20 +373,20 @@ export default function AdminPatients() {
                   />
                 </div> */}
                 <div className="space-y-2">
-  <Label>Date Of Birth</Label>
-  <Input
-    type="date"
-    value={formData.dateOfBirth}
-    min={minDate}
-    max={maxDate}
-    onChange={(e) =>
-      setFormData({ ...formData, dateOfBirth: e.target.value })
-    }
-  />
-  <p className="text-xs text-muted-foreground">
-    Age must be between {MIN_AGE} and {MAX_AGE} years.
-  </p>
-</div>
+                  <Label>Date Of Birth</Label>
+                  <Input
+                    type="date"
+                    value={formData.dateOfBirth}
+                    min={minDate}
+                    max={maxDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, dateOfBirth: e.target.value })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Age must be between {MIN_AGE} and {MAX_AGE} years.
+                  </p>
+                </div>
 
                 <div className="flex gap-2 pt-2">
                   <Button

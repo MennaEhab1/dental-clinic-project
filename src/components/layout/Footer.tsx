@@ -7,19 +7,36 @@ import {
   Twitter,
   Instagram,
   Linkedin,
-  Clock,
 } from "lucide-react";
+
+const validFooterRoutes = new Set([
+  "/",
+  "/services",
+  "/doctors",
+  "/login",
+  "/register",
+  "/reset-password",
+  "/confirm-email",
+  "/booking",
+  "/booking/confirmation",
+  "/admin/specialities",
+]);
+
+const resolveFooterRoute = (href: string) => {
+  const [path] = href.split(/[?#]/);
+  return validFooterRoutes.has(path) ? href : "/";
+};
 
 const footerLinks = {
   services: [
-    { label: "General Dentistry", href: "/services#general" },
-    { label: "Cosmetic Dentistry", href: "/services#cosmetic" },
-    { label: "Orthodontics", href: "/services#orthodontics" },
-    { label: "Oral Surgery", href: "/services#surgery" },
-    { label: "Pediatric Dentistry", href: "/services#pediatric" },
+    { label: "General Dentistry", href: "/doctors?specialty=general" },
+    { label: "Cosmetic Dentistry", href: "/doctors?specialty=cosmetic" },
+    { label: "Orthodontics", href: "/doctors?specialty=orthodontics" },
+    { label: "Oral Surgery", href: "/doctors?specialty=oral-surgery" },
+    { label: "Pediatric Dentistry", href: "/doctors?specialty=pediatric" },
   ],
   quickLinks: [
-    { label: "About Us", href: "/about" },
+    // { label: "About Us", href: "/about" },
     { label: "Our Doctors", href: "/doctors" },
     { label: "Book Appointment", href: "/booking" },
     { label: "Patient Portal", href: "/login" },
@@ -40,13 +57,21 @@ const socialLinks = [
 ];
 
 export function Footer() {
+  const handleFooterNavigationClick = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <footer className="bg-card border-t border-border">
       <div className="container mx-auto px-4 py-12 md:py-16">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-12">
           {/* Brand & Contact */}
           <div className="lg:col-span-1">
-            <Link to="/" className="flex items-center gap-2 mb-4">
+            <Link
+              to="/"
+              onClick={handleFooterNavigationClick}
+              className="flex items-center gap-2 mb-4"
+            >
               <img
                 src="/LogoLunare.png"
                 alt="Lunare Logo"
@@ -110,7 +135,8 @@ export function Footer() {
               {footerLinks.services.map((link) => (
                 <li key={link.href}>
                   <Link
-                    to={link.href}
+                    to={resolveFooterRoute(link.href)}
+                    onClick={handleFooterNavigationClick}
                     className="text-sm text-muted-foreground hover:text-primary transition-colors"
                   >
                     {link.label}
@@ -129,7 +155,8 @@ export function Footer() {
               {footerLinks.quickLinks.map((link) => (
                 <li key={link.href}>
                   <Link
-                    to={link.href}
+                    to={resolveFooterRoute(link.href)}
+                    onClick={handleFooterNavigationClick}
                     className="text-sm text-muted-foreground hover:text-primary transition-colors"
                   >
                     {link.label}
@@ -184,7 +211,8 @@ export function Footer() {
             {footerLinks.legal.map((link) => (
               <Link
                 key={link.href}
-                to={link.href}
+                to={resolveFooterRoute(link.href)}
+                onClick={handleFooterNavigationClick}
                 className="text-sm text-muted-foreground hover:text-primary transition-colors"
               >
                 {link.label}

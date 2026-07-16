@@ -420,7 +420,7 @@ export function DashboardLayout({ children, role }: DashboardLayoutProps) {
           <div className="h-16 flex items-center justify-between px-4 border-b border-border">
             <Link to="/" className="flex items-center gap-2">
               <img
-                src="/public/LogoLunare.png"
+                src="/LogoLunare.png"
                 alt="Lunare Logo"
                 className="
       h-8

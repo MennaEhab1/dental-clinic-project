@@ -33,10 +33,21 @@ import {
   Filter,
   ToggleLeft,
   ToggleRight,
+  MessageSquare,
 } from "lucide-react";
-import { adminDoctorService, specializationService } from "@/services/api";
+import {
+  adminDoctorService,
+  reviewService,
+  specializationService,
+} from "@/services/api";
 import type { Doctor } from "@/types";
 import { toast } from "@/hooks/use-toast";
+import { DoctorReviewsDialog } from "@/components/doctors/DoctorReviewsDialog";
+
+interface DoctorReviewSummary {
+  averageRating: number;
+  totalReviews: number;
+}
 
 interface DoctorFormData {
   fullName: string;
@@ -60,6 +71,12 @@ export default function AdminDoctors() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<Doctor | null>(null);
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
+  const [reviewsOpenDoctor, setReviewsOpenDoctor] = useState<Doctor | null>(
+    null,
+  );
+  const [doctorReviewSummary, setDoctorReviewSummary] = useState<
+    Record<string, DoctorReviewSummary>
+  >({});
   const [infoOpen, setInfoOpen] = useState(false);
   const [formData, setFormData] = useState<DoctorFormData>({
     fullName: "",
@@ -97,7 +114,45 @@ export default function AdminDoctors() {
     try {
       setIsLoading(true);
       const response = await adminDoctorService.getAll();
-      setDoctors(response.data);
+      const doctorList = response.data || [];
+      setDoctors(doctorList);
+
+      const reviewEntries = await Promise.all(
+        doctorList.map(async (doctor) => {
+          try {
+            const reviewsResponse = await reviewService.getReviewsForDoctor(
+              doctor.id,
+            );
+            const reviews = reviewsResponse.success
+              ? reviewsResponse.data || []
+              : [];
+            const totalReviews = reviews.length;
+            const averageRating =
+              totalReviews > 0
+                ? reviews.reduce((sum, item) => sum + (item.rating || 0), 0) /
+                  totalReviews
+                : 0;
+
+            return [
+              doctor.id,
+              {
+                averageRating,
+                totalReviews,
+              },
+            ] as const;
+          } catch {
+            return [
+              doctor.id,
+              {
+                averageRating: 0,
+                totalReviews: 0,
+              },
+            ] as const;
+          }
+        }),
+      );
+
+      setDoctorReviewSummary(Object.fromEntries(reviewEntries));
     } catch (error) {
       console.error("Failed to fetch doctors:", error);
       toast({
@@ -953,10 +1008,35 @@ export default function AdminDoctors() {
                         <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Star className="w-3 h-3 text-warning fill-warning" />{" "}
-                            {doctor.rating || 0}
+                            {(
+                              doctorReviewSummary[doctor.id]?.averageRating ??
+                              doctor.averageRating ??
+                              doctor.rating ??
+                              0
+                            ).toFixed(1)}
+                          </span>
+                          <span>
+                            {doctorReviewSummary[doctor.id]?.totalReviews ??
+                              doctor.totalReviews ??
+                              doctor.reviewCount ??
+                              0}{" "}
+                            reviews
                           </span>
                           <span>{doctor.experience} yrs exp</span>
                           <span>${doctor.consultationFee}/visit</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px]"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setReviewsOpenDoctor(doctor);
+                            }}
+                          >
+                            <MessageSquare className="w-3 h-3 mr-1" />
+                            Reviews
+                          </Button>
                         </div>
                         <div className="flex flex-wrap gap-1 mt-2">
                           {doctor.workingDays?.slice(0, 3).map((d) => (
@@ -989,6 +1069,15 @@ export default function AdminDoctors() {
           doctor={selectedDoctor}
           open={infoOpen}
           onOpenChange={setInfoOpen}
+        />
+      )}
+      {reviewsOpenDoctor && (
+        <DoctorReviewsDialog
+          doctor={reviewsOpenDoctor}
+          open={Boolean(reviewsOpenDoctor)}
+          onOpenChange={(open) => {
+            if (!open) setReviewsOpenDoctor(null);
+          }}
         />
       )}
     </DashboardLayout>

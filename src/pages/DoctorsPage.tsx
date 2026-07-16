@@ -1,30 +1,48 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { MainLayout } from '@/components/layout/MainLayout';
-import { DoctorCard } from '@/components/doctors/DoctorCard';
-import { LoadingPage } from '@/components/common/LoadingSpinner';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Search } from 'lucide-react';
-import { doctorService } from '@/services/api';
-import type { Doctor, DentalSpecialty } from '@/types';
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { MainLayout } from "@/components/layout/MainLayout";
+import { DoctorCard } from "@/components/doctors/DoctorCard";
+import { LoadingPage } from "@/components/common/LoadingSpinner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
+import { doctorService } from "@/services/api";
+import type { Doctor, DentalSpecialty } from "@/types";
+import { useSearchParams } from "react-router-dom";
 
-const specialties: { value: DentalSpecialty | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Specialists' },
-  { value: 'general', label: 'General' },
-  { value: 'cosmetic', label: 'Cosmetic' },
-  { value: 'orthodontics', label: 'Orthodontics' },
-  { value: 'oral-surgery', label: 'Oral Surgery' },
-  { value: 'pediatric', label: 'Pediatric' },
-  { value: 'endodontics', label: 'Endodontics' },
+const specialties: { value: DentalSpecialty | "all"; label: string }[] = [
+  { value: "all", label: "All Specialists" },
+  { value: "general", label: "General" },
+  { value: "cosmetic", label: "Cosmetic" },
+  { value: "orthodontics", label: "Orthodontics" },
+  { value: "oral-surgery", label: "Oral Surgery" },
+  { value: "pediatric", label: "Pediatric" },
+  { value: "endodontics", label: "Endodontics" },
 ];
 
+const specialtyValues = specialties.map((specialty) => specialty.value);
+
+const isValidSpecialty = (value: string): value is DentalSpecialty | "all" =>
+  specialtyValues.includes(value as DentalSpecialty | "all");
+
 export default function DoctorsPage() {
+  const [searchParams] = useSearchParams();
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [filteredDoctors, setFilteredDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSpecialty, setSelectedSpecialty] = useState<DentalSpecialty | 'all'>('all');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedSpecialty, setSelectedSpecialty] = useState<
+    DentalSpecialty | "all"
+  >("all");
+
+  useEffect(() => {
+    const specialtyParam = (
+      searchParams.get("specialty") || "all"
+    ).toLowerCase();
+    setSelectedSpecialty(
+      isValidSpecialty(specialtyParam) ? specialtyParam : "all",
+    );
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchDoctors = async () => {
@@ -33,7 +51,7 @@ export default function DoctorsPage() {
         setDoctors(response.data);
         setFilteredDoctors(response.data);
       } catch (error) {
-        console.error('Failed to fetch doctors:', error);
+        console.error("Failed to fetch doctors:", error);
       } finally {
         setIsLoading(false);
       }
@@ -44,16 +62,17 @@ export default function DoctorsPage() {
   useEffect(() => {
     let filtered = doctors;
 
-    if (selectedSpecialty !== 'all') {
-      filtered = filtered.filter(d => d.specialty === selectedSpecialty);
+    if (selectedSpecialty !== "all") {
+      filtered = filtered.filter((d) => d.specialty === selectedSpecialty);
     }
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(d =>
-        d.firstName.toLowerCase().includes(query) ||
-        d.lastName.toLowerCase().includes(query) ||
-        d.bio.toLowerCase().includes(query)
+      filtered = filtered.filter(
+        (d) =>
+          d.firstName.toLowerCase().includes(query) ||
+          d.lastName.toLowerCase().includes(query) ||
+          d.bio.toLowerCase().includes(query),
       );
     }
 
@@ -82,8 +101,9 @@ export default function DoctorsPage() {
               Meet Our <span className="gradient-text">Expert Team</span>
             </h1>
             <p className="text-lg text-muted-foreground">
-              Our dedicated team of dental professionals is committed to providing 
-              you with the highest quality care in a comfortable environment.
+              Our dedicated team of dental professionals is committed to
+              providing you with the highest quality care in a comfortable
+              environment.
             </p>
           </motion.div>
         </div>
@@ -106,10 +126,18 @@ export default function DoctorsPage() {
               {specialties.map((specialty) => (
                 <Button
                   key={specialty.value}
-                  variant={selectedSpecialty === specialty.value ? 'default' : 'outline'}
+                  variant={
+                    selectedSpecialty === specialty.value
+                      ? "default"
+                      : "outline"
+                  }
                   size="sm"
                   onClick={() => setSelectedSpecialty(specialty.value)}
-                  className={selectedSpecialty === specialty.value ? 'gradient-bg border-0' : ''}
+                  className={
+                    selectedSpecialty === specialty.value
+                      ? "gradient-bg border-0"
+                      : ""
+                  }
                 >
                   {specialty.label}
                 </Button>
@@ -144,8 +172,8 @@ export default function DoctorsPage() {
                 variant="outline"
                 className="mt-4"
                 onClick={() => {
-                  setSearchQuery('');
-                  setSelectedSpecialty('all');
+                  setSearchQuery("");
+                  setSelectedSpecialty("all");
                 }}
               >
                 Clear Filters

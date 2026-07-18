@@ -674,12 +674,12 @@ export default function AdminPharmacy() {
                             <span>{pharmacy.phone}</span>
                           </div>
                         )}
-                        {pharmacy.email && (
+                        {/* {pharmacy.email && (
                           <div className="flex items-center gap-2">
                             <Mail className="w-3.5 h-3.5 shrink-0" />
                             <span className="truncate">{pharmacy.email}</span>
                           </div>
-                        )}
+                        )} */}
                         {(pharmacy.openingTime || pharmacy.closingTime) && (
                           <div className="flex items-center gap-2">
                             <Clock className="w-3.5 h-3.5 shrink-0" />
@@ -979,7 +979,7 @@ export default function AdminPharmacy() {
                     placeholder="+20..."
                   />
                 </div>
-                <div className="space-y-2">
+                {/* <div className="space-y-2">
                   <Label>Email</Label>
                   <Input
                     type="email"
@@ -989,7 +989,7 @@ export default function AdminPharmacy() {
                     }
                     placeholder="pharmacy@example.com"
                   />
-                </div>
+                </div> */}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
